@@ -1,0 +1,7 @@
+io.github.piyushdaiya.booxstream.app-pngs-0 /Users/piyushdaiya/Documents/projects/booxstream/android/app/build/generated/res/pngs/debug
+io.github.piyushdaiya.booxstream.app-updated_navigation_xml-1 /Users/piyushdaiya/Documents/projects/booxstream/android/app/build/generated/updated_navigation_xml/debug
+io.github.piyushdaiya.booxstream.app-packageDebugResources-2 /Users/piyushdaiya/Documents/projects/booxstream/android/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+io.github.piyushdaiya.booxstream.app-packageDebugResources-3 /Users/piyushdaiya/Documents/projects/booxstream/android/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
+io.github.piyushdaiya.booxstream.app-debug-4 /Users/piyushdaiya/Documents/projects/booxstream/android/app/build/intermediates/merged_res/debug/mergeDebugResources
+io.github.piyushdaiya.booxstream.app-debug-5 /Users/piyushdaiya/Documents/projects/booxstream/android/app/src/debug/res
+io.github.piyushdaiya.booxstream.app-main-6 /Users/piyushdaiya/Documents/projects/booxstream/android/app/src/main/res
