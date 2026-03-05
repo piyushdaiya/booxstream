@@ -36,23 +36,41 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Gradle wrapper executable
-        if: runner.os != 'Windows'
         run: chmod +x ./gradlew
+
+      # ✅ Fail fast if repo contains a local Android Studio Java home
+      - name: Guard: no hardcoded org.gradle.java.home
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Checking for org.gradle.java.home in repo..."
+          if grep -R "org.gradle.java.home" -n . | grep -v "/build/" ; then
+            echo "::error::Found org.gradle.java.home in repository. Remove it from gradle.properties (CI must use setup-java)."
+            exit 1
+          fi
+
+      - name: Show Java + Gradle env
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          ./gradlew -version
 
       # ✅ Unit tests
       - name: Unit tests (:core)
-        run: ./gradlew :core:test --stacktrace
+        run: ./gradlew :core:test --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Unit tests (:app)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       # ✅ Lint
       - name: Lint (:app)
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: ./gradlew :app:lintDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       # ✅ Build APK
       - name: Assemble Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: ./gradlew :app:assembleDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -78,7 +96,6 @@ jobs:
             android/**/build/reports/tests/**
           if-no-files-found: warn
 
-
   go:
     name: Go (test, build, package) - ${{ matrix.os }} / ${{ matrix.goarch }}
     runs-on: ${{ matrix.os }}
@@ -88,8 +105,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         goarch: [amd64, arm64]
         exclude:
-          # GitHub-hosted Windows runners do not support arm64 builds well for cross-compiling in all cases.
-          # If you *want* to attempt it, remove this exclude.
           - os: windows-latest
             goarch: arm64
 
@@ -108,42 +123,48 @@ jobs:
           cache: true
           cache-dependency-path: host/booxcpy/go.sum
 
+      # ✅ Unit tests
       - name: Go test
         env:
-          GOOS: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'darwin' || 'linux') }}
           GOARCH: ${{ matrix.goarch }}
         run: go test ./... -v
 
-      - name: Build + package booxcpy (tar.gz on unix, zip on windows)
-        shell: bash
+      # ✅ Build booxcpy (produces dist/booxcpy or dist/booxcpy.exe)
+      - name: Build booxcpy
         env:
-          GOOS: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'darwin' || 'linux') }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          set -euo pipefail
           mkdir -p dist pkg
+          go build -trimpath -ldflags="-s -w" -o dist/booxcpy .
 
+      # ✅ Package on Linux/macOS -> tar.gz
+      - name: Package booxcpy (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          GOOS="$(go env GOOS)"
           BIN="booxcpy-${GOOS}-${GOARCH}"
-          EXT=""
-          if [[ "${GOOS}" == "windows" ]]; then
-            EXT=".exe"
-          fi
-
-          echo "Building ${BIN}${EXT}"
-          go build -trimpath -ldflags="-s -w" -o "dist/${BIN}${EXT}" .
-
-          # Package like scrcpy
-          if [[ "${GOOS}" == "windows" ]]; then
-            PKG="pkg/${BIN}.zip"
-            (cd dist && zip -9 "../${PKG}" "${BIN}${EXT}")
-          else
-            PKG="pkg/${BIN}.tar.gz"
-            (cd dist && tar -czf "../${PKG}" "${BIN}${EXT}")
-          fi
-
-          echo "Packaged: ${PKG}"
+          mv dist/booxcpy "dist/${BIN}"
+          tar -czf "pkg/${BIN}.tar.gz" -C dist "${BIN}"
           ls -lh dist pkg
+
+      # ✅ Package on Windows -> zip (PowerShell, no zip dependency)
+      - name: Package booxcpy (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          $goos = (go env GOOS)
+          $bin = "booxcpy-$goos-$env:GOARCH.exe"
+          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
+          Move-Item -Force dist\booxcpy.exe dist\$bin
+          Compress-Archive -Path dist\$bin -DestinationPath pkg\("booxcpy-$goos-$env:GOARCH.zip") -Force
+          Get-ChildItem dist,pkg
 
       - name: Upload booxcpy binary artifact
         uses: actions/upload-artifact@v4

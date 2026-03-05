@@ -3,5 +3,4 @@
   "gradle.nestedProjects": true,
   "editor.formatOnSave": true,
   "files.insertFinalNewline": true
-  "java.jdt.ls.java.home": "/Applications/Android Studio.app/Contents/jbr/Contents/Home",
 }

@@ -37,21 +37,40 @@ jobs:
       - name: Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      # ✅ Unit tests + lint on release too
+      - name: Guard: no hardcoded org.gradle.java.home
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -R "org.gradle.java.home" -n . | grep -v "/build/" ; then
+            echo "::error::Found org.gradle.java.home in repository. Remove it from gradle.properties (release must use setup-java)."
+            exit 1
+          fi
+
+      - name: Show Java + Gradle env
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "JAVA_HOME=$JAVA_HOME"
+          java -version
+          ./gradlew -version
+
+      # ✅ Unit tests + lint
       - name: Unit tests (:core)
-        run: ./gradlew :core:test --stacktrace
+        run: ./gradlew :core:test --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Unit tests (:app)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Lint (:app)
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: ./gradlew :app:lintDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Assemble Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: ./gradlew :app:assembleDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Stash APK
+        shell: bash
         run: |
+          set -euo pipefail
           mkdir -p ../release-dist
           cp app/build/outputs/apk/debug/app-debug.apk ../release-dist/BooxStream-${{ github.ref_name }}-debug.apk
           ls -lh ../release-dist
@@ -62,7 +81,6 @@ jobs:
           name: release-apk
           path: android/release-dist/*.apk
           if-no-files-found: error
-
 
   build-go:
     name: Build & package booxcpy - ${{ matrix.os }} / ${{ matrix.goarch }}
@@ -93,36 +111,44 @@ jobs:
 
       - name: Go test
         env:
-          GOOS: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'darwin' || 'linux') }}
           GOARCH: ${{ matrix.goarch }}
         run: go test ./... -v
 
-      - name: Build + package booxcpy
-        shell: bash
+      - name: Build booxcpy
         env:
-          GOOS: ${{ runner.os == 'Windows' && 'windows' || (runner.os == 'macOS' && 'darwin' || 'linux') }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          set -euo pipefail
           mkdir -p ../../release-dist
+          go build -trimpath -ldflags="-s -w" -o ../../release-dist/booxcpy .
 
+      - name: Package booxcpy (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          GOOS="$(go env GOOS)"
           BIN="booxcpy-${GOOS}-${GOARCH}"
-          EXT=""
-          if [[ "${GOOS}" == "windows" ]]; then EXT=".exe"; fi
-
-          go build -trimpath -ldflags="-s -w" -o "../../release-dist/${BIN}${EXT}" .
-
-          # Package assets (scrcpy-style)
-          if [[ "${GOOS}" == "windows" ]]; then
-            (cd ../../release-dist && zip -9 "${BIN}.zip" "${BIN}${EXT}")
-            rm -f "../../release-dist/${BIN}${EXT}"
-          else
-            (cd ../../release-dist && tar -czf "${BIN}.tar.gz" "${BIN}${EXT}")
-            rm -f "../../release-dist/${BIN}${EXT}"
-          fi
-
+          mv ../../release-dist/booxcpy "../../release-dist/${BIN}"
+          (cd ../../release-dist && tar -czf "${BIN}.tar.gz" "${BIN}")
+          rm -f "../../release-dist/${BIN}"
           ls -lh ../../release-dist
+
+      - name: Package booxcpy (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          $goos = (go env GOOS)
+          $bin = "booxcpy-$goos-$env:GOARCH.exe"
+          if (!(Test-Path "..\..\release-dist")) { New-Item -ItemType Directory -Force -Path "..\..\release-dist" | Out-Null }
+          Move-Item -Force ..\..\release-dist\booxcpy.exe ..\..\release-dist\$bin
+          Compress-Archive -Path ..\..\release-dist\$bin -DestinationPath ..\..\release-dist\("booxcpy-$goos-$env:GOARCH.zip") -Force
+          Remove-Item -Force ..\..\release-dist\$bin
+          Get-ChildItem ..\..\release-dist
 
       - name: Upload booxcpy packages (for publish job)
         uses: actions/upload-artifact@v4
@@ -130,7 +156,6 @@ jobs:
           name: release-booxcpy-${{ runner.os }}-${{ matrix.goarch }}
           path: host/release-dist/*
           if-no-files-found: error
-
 
   publish:
     name: Publish GitHub Release
