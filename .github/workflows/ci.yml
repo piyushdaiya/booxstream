@@ -2,8 +2,9 @@ name: CI (Android + Go)
 
 on:
   push:
-    branches: ["main"]
-  pull_request:
+    branches:
+      - main
+  pull_request: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -16,7 +17,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os:
+          - ubuntu-latest
+          - macos-latest
 
     defaults:
       run:
@@ -38,14 +41,14 @@ jobs:
       - name: Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      # ✅ Fail fast if repo contains a local Android Studio Java home
       - name: Guard: no hardcoded org.gradle.java.home
         shell: bash
         run: |
           set -euo pipefail
-          echo "Checking for org.gradle.java.home in repo..."
-          if grep -R "org.gradle.java.home" -n . | grep -v "/build/" ; then
-            echo "::error::Found org.gradle.java.home in repository. Remove it from gradle.properties (CI must use setup-java)."
+          hits="$(grep -RIn --exclude-dir=build --exclude-dir=.gradle 'org.gradle.java.home' . || true)"
+          if [[ -n "$hits" ]]; then
+            echo "$hits"
+            echo "::error::Found org.gradle.java.home in repository. Remove it from gradle.properties; CI must use setup-java."
             exit 1
           fi
 
@@ -57,18 +60,15 @@ jobs:
           java -version
           ./gradlew -version
 
-      # ✅ Unit tests
       - name: Unit tests (:core)
         run: ./gradlew :core:test --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Unit tests (:app)
         run: ./gradlew :app:testDebugUnitTest --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
-      # ✅ Lint
       - name: Lint (:app)
         run: ./gradlew :app:lintDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
-      # ✅ Build APK
       - name: Assemble Debug APK
         run: ./gradlew :app:assembleDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
@@ -102,8 +102,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        goarch: [amd64, arm64]
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        goarch:
+          - amd64
+          - arm64
         exclude:
           - os: windows-latest
             goarch: arm64
@@ -123,45 +128,38 @@ jobs:
           cache: true
           cache-dependency-path: host/booxcpy/go.sum
 
-      # ✅ Unit tests
       - name: Go test
         env:
           GOARCH: ${{ matrix.goarch }}
         run: go test ./... -v
 
-      # ✅ Build booxcpy (produces dist/booxcpy or dist/booxcpy.exe)
-      - name: Build booxcpy
-        env:
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          mkdir -p dist pkg
-          go build -trimpath -ldflags="-s -w" -o dist/booxcpy .
-
-      # ✅ Package on Linux/macOS -> tar.gz
-      - name: Package booxcpy (Linux/macOS)
+      - name: Build booxcpy (unix)
         if: runner.os != 'Windows'
         shell: bash
         env:
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
           set -euo pipefail
+          mkdir -p dist pkg
+          go build -trimpath -ldflags="-s -w" -o dist/booxcpy .
           GOOS="$(go env GOOS)"
           BIN="booxcpy-${GOOS}-${GOARCH}"
           mv dist/booxcpy "dist/${BIN}"
           tar -czf "pkg/${BIN}.tar.gz" -C dist "${BIN}"
           ls -lh dist pkg
 
-      # ✅ Package on Windows -> zip (PowerShell, no zip dependency)
-      - name: Package booxcpy (Windows)
+      - name: Build booxcpy (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
+          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
+          go build -trimpath -ldflags="-s -w" -o dist\booxcpy.exe .
           $goos = (go env GOOS)
           $bin = "booxcpy-$goos-$env:GOARCH.exe"
-          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
           Move-Item -Force dist\booxcpy.exe dist\$bin
           Compress-Archive -Path dist\$bin -DestinationPath pkg\("booxcpy-$goos-$env:GOARCH.zip") -Force
           Get-ChildItem dist,pkg
