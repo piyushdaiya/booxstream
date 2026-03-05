@@ -62,7 +62,7 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Lifecycle
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.2")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")
