@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 9.1.0" type="incidents">
+
+    <incident
+        id="OldTargetApi"
+        severity="warning"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the `android.os.Build.VERSION_CODES` javadoc for details.">
+        <fix-replace
+            description="Update targetSdkVersion to 36"
+            oldString="35"
+            replacement="36"
+            priority="0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="14"
+            column="9"
+            startOffset="287"
+            endLine="14"
+            endColumn="23"
+            endOffset="301"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of `compileSdk` than 35 is available: 36">
+        <fix-replace
+            description="Set compileSdk to 36"
+            oldString="35"
+            replacement="36"
+            priority="0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="9"
+            column="5"
+            startOffset="163"
+            endLine="9"
+            endColumn="20"
+            endOffset="178"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.activity:activity-compose than 1.10.1 is available: 1.12.4">
+        <fix-replace
+            description="Change to 1.12.4"
+            family="Update versions"
+            oldString="1.10.1"
+            replacement="1.12.4"
+            priority="0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="58"
+            column="20"
+            startOffset="1176"
+            endLine="58"
+            endColumn="63"
+            endOffset="1219"/>
+    </incident>
+
+    <incident
+        id="GradleDependency"
+        severity="warning"
+        message="A newer version of androidx.lifecycle:lifecycle-runtime-ktx than 2.9.2 is available: 2.10.0">
+        <fix-replace
+            description="Change to 2.10.0"
+            family="Update versions"
+            oldString="2.9.2"
+            replacement="2.10.0"
+            priority="0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="65"
+            column="20"
+            startOffset="1481"
+            endLine="65"
+            endColumn="68"
+            endOffset="1529"/>
+    </incident>
+
+    <incident
+        id="NewerVersionAvailable"
+        severity="warning"
+        message="A newer version of org.robolectric:robolectric than 4.13 is available: 4.16.1">
+        <fix-replace
+            description="Change to 4.16.1"
+            family="Update versions"
+            oldString="4.13"
+            replacement="4.16.1"
+            priority="0"/>
+        <location
+            file="${:app*projectDir}/build.gradle.kts"
+            line="69"
+            column="24"
+            startOffset="1615"
+            endLine="69"
+            endColumn="58"
+            endOffset="1649"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; `SDK_INT` is always >= 26">
+        <fix-data conditional="true"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/codec/CodecProbe.kt"
+            line="161"
+            column="17"
+            startOffset="5386"
+            endLine="161"
+            endColumn="44"
+            endOffset="5413"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; `SDK_INT` is always >= 26">
+        <fix-data conditional="true"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/stream/StreamService.kt"
+            line="118"
+            column="13"
+            startOffset="3644"
+            endLine="118"
+            endColumn="40"
+            endOffset="3671"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; `SDK_INT` is always >= 26">
+        <fix-data conditional="true"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/stream/Vp8IvfStreamService.kt"
+            line="569"
+            column="13"
+            startOffset="21065"
+            endLine="569"
+            endColumn="40"
+            endOffset="21092"/>
+    </incident>
+
+    <incident
+        id="UseKtx"
+        severity="warning"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?">
+        <fix-composite
+            description="Replace with the edit extension function"
+            family="Replace with the edit extension function"
+            robot="true"
+            independent="true">
+            <fix-replace
+                description="Replace with edit"
+                robot="true"
+                independent="true"
+                oldString="edit("
+                replacement="edit"
+                reformat="value"
+                imports="androidx.core.content.edit"
+                priority="0">
+                <range
+                    file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/stream/TokenStorm.kt"
+                    startOffset="552"
+                    endOffset="557"/>
+            </fix-replace>
+            <fix-replace
+                description="Replace with  {"
+                robot="true"
+                independent="true"
+                oldString=")"
+                replacement=" {"
+                priority="0">
+                <range
+                    file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/stream/TokenStorm.kt"
+                    startOffset="557"
+                    endOffset="558"/>
+            </fix-replace>
+            <fix-replace
+                description="Delete &quot;.&quot;"
+                robot="true"
+                independent="true"
+                oldString="."
+                replacement=""
+                priority="0">
+                <range
+                    file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/stream/TokenStorm.kt"
+                    startOffset="558"
+                    endOffset="559"/>
+            </fix-replace>
+            <fix-replace
+                description="Replace with }"
+                robot="true"
+                independent="true"
+                oldString=".apply()"
+                replacement="}"
+                priority="0">
+                <range
+                    file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/stream/TokenStorm.kt"
+                    startOffset="584"
+                    endOffset="592"/>
+            </fix-replace>
+        </fix-composite>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/io/github/piyushdaiya/booxstream/stream/TokenStorm.kt"
+            line="18"
+            column="9"
+            startOffset="546"
+            endLine="18"
+            endColumn="21"
+            endOffset="558"/>
+    </incident>
+
+</incidents>

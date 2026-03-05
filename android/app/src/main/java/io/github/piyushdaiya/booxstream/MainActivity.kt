@@ -4,12 +4,15 @@ package io.github.piyushdaiya.booxstream
 
 import android.app.Activity
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,12 +39,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.piyushdaiya.booxstream.codec.CodecProbeScreen
 import io.github.piyushdaiya.booxstream.stream.Vp8IvfStreamService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.result.contract.ActivityResultContracts.RequestPermission
+import androidx.core.content.ContextCompat
 
 data class Vp8Stats(
     val fps: Float = 0f,
@@ -62,8 +70,20 @@ object Vp8StatsStore {
     private val _running = MutableStateFlow(false)
     val running = _running.asStateFlow()
 
-    fun update(s: Vp8Stats) = _flow.update { s }
+    private val _lastStopReason = MutableStateFlow<String?>(null)
+    val lastStopReason = _lastStopReason.asStateFlow()
+
+    private val _hostConnected = MutableStateFlow(false)
+    val hostConnected = _hostConnected.asStateFlow()
+
+    private val _lastHostEventReason = MutableStateFlow<String?>(null)
+    val lastHostEventReason = _lastHostEventReason.asStateFlow()
+
+    fun update(s: Vp8Stats?) = _flow.update { s }
     fun updateRunning(r: Boolean) = _running.update { r }
+    fun updateStopReason(reason: String?) = _lastStopReason.update { reason }
+    fun updateHostConnected(connected: Boolean) = _hostConnected.update { connected }
+    fun updateLastHostEventReason(reason: String?) = _lastHostEventReason.update { reason }
 }
 
 private data class MirrorCfg(
@@ -73,29 +93,21 @@ private data class MirrorCfg(
     val bitrate: Int = 0 // 0 = auto on service
 )
 
-/**
- * Option A UX:
- * - User taps "Start Mirroring", accepts MediaProjection prompt.
- * - Host tool (booxcpy) launches activity with autostart extras, then waits for stream.
- *
- * Host tool:
- *   adb shell am start -S -n io.github.piyushdaiya.booxstream/.MainActivity \
- *     --ez booxstream_autostart true --ei width 1280 --ei height 720 --ei fps 12 --ei bitrate 0
- */
 class MainActivity : ComponentActivity() {
 
     companion object {
-        // Activity extras (from host tool)
         private const val EXTRA_AUTOSTART = "booxstream_autostart"
         private const val EXTRA_WIDTH = "width"
         private const val EXTRA_HEIGHT = "height"
         private const val EXTRA_FPS = "fps"
         private const val EXTRA_BITRATE = "bitrate"
+        private const val DEBUG_COMMAND =
+            "adb forward --remove tcp:27183 2>/dev/null; adb forward tcp:27183 localabstract:booxstream_ivf\n" +
+                "ffplay -fflags nobuffer -flags low_delay -framedrop -f ivf -i tcp://127.0.0.1:27183"
     }
 
     private var receiver: BroadcastReceiver? = null
 
-    // Mutable state updated by both onCreate + onNewIntent
     private var cfgState by mutableStateOf(MirrorCfg())
     private var autostartNonce by mutableIntStateOf(0)
 
@@ -111,13 +123,11 @@ class MainActivity : ComponentActivity() {
             width = w.coerceIn(320, 2600),
             height = h.coerceIn(320, 2600),
             fps = fps.coerceIn(5, 60),
-            bitrate = br // 0 allowed (auto on service)
+            bitrate = br
         )
 
         val auto = i.getBooleanExtra(EXTRA_AUTOSTART, false)
-        if (auto) {
-            autostartNonce++
-        }
+        if (auto) autostartNonce++
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -125,15 +135,26 @@ class MainActivity : ComponentActivity() {
 
         val mpMgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
 
-        // Read initial intent
         applyIntent(intent)
 
-        // Initialize running state (fast path, before any broadcasts arrive)
-        Vp8StatsStore.updateRunning(Vp8IvfStreamService.isRunning.get())
+        // fast UI init (before broadcasts arrive)
+        val serviceRunning = Vp8IvfStreamService.isRunning.get()
+        Vp8StatsStore.updateRunning(serviceRunning)
+        Vp8StatsStore.updateHostConnected(false)
+        Vp8StatsStore.updateLastHostEventReason(null)
+        if (!serviceRunning) {
+            Vp8StatsStore.update(null)
+        }
 
-        // MediaProjection permission launcher
         val launcher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
-            if (res.resultCode != Activity.RESULT_OK || res.data == null) return@registerForActivityResult
+            if (res.resultCode != Activity.RESULT_OK || res.data == null) {
+                // user denied prompt; revert UI state
+                Vp8StatsStore.updateRunning(false)
+                Vp8StatsStore.updateHostConnected(false)
+                Vp8StatsStore.updateLastHostEventReason(null)
+                Vp8StatsStore.updateStopReason("permission_denied")
+                return@registerForActivityResult
+            }
 
             val i = Intent(this, Vp8IvfStreamService::class.java).apply {
                 putExtra(Vp8IvfStreamService.EXTRA_RESULT_CODE, res.resultCode)
@@ -146,7 +167,6 @@ class MainActivity : ComponentActivity() {
             startForegroundService(i)
         }
 
-        // One receiver for both STATS + STATE
         receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent) {
                 when (intent.action) {
@@ -170,38 +190,73 @@ class MainActivity : ComponentActivity() {
 
                     Vp8IvfStreamService.ACTION_VP8_STATE -> {
                         val r = intent.getBooleanExtra(Vp8IvfStreamService.EXTRA_STATE_RUNNING, false)
-                        Vp8StatsStore.updateRunning(r)
+                        val reason = intent.getStringExtra(Vp8IvfStreamService.EXTRA_STATE_REASON)
 
-                        // When stopped, optionally clear stats so UI doesn't look "stuck"
+                        Vp8StatsStore.updateRunning(r)
+                        when (reason) {
+                            Vp8IvfStreamService.REASON_CLIENT_CONNECTED -> {
+                                Vp8StatsStore.updateHostConnected(true)
+                                Vp8StatsStore.updateLastHostEventReason(reason)
+                            }
+
+                            Vp8IvfStreamService.REASON_CLIENT_DISCONNECTED -> {
+                                Vp8StatsStore.updateHostConnected(false)
+                                Vp8StatsStore.updateLastHostEventReason(reason)
+                            }
+                        }
+
                         if (!r) {
-                            Vp8StatsStore.update(Vp8Stats())
+                            Vp8StatsStore.updateHostConnected(false)
+                            Vp8StatsStore.updateLastHostEventReason(reason)
+                            Vp8StatsStore.update(null) // clear stats instead of zeroing them
+                            Vp8StatsStore.updateStopReason(reason ?: "stopped")
+                        } else {
+                            Vp8StatsStore.updateStopReason(null)
                         }
                     }
                 }
             }
         }
 
-        // Register for both actions
         val filter = IntentFilter().apply {
             addAction(Vp8IvfStreamService.ACTION_VP8_STATS)
             addAction(Vp8IvfStreamService.ACTION_VP8_STATE)
         }
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(receiver, filter)
-        }
+        ContextCompat.registerReceiver(
+    this,
+    receiver,
+    filter,
+    ContextCompat.RECEIVER_NOT_EXPORTED
+)
+        // Android 13+ requires runtime permission to post notifications
+        val notifPermLauncher = registerForActivityResult(RequestPermission()) { /* ignore result */ }
 
+        if (Build.VERSION.SDK_INT >= 33) {
+            val granted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!granted) {
+                notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
         setContent {
             MaterialTheme {
                 var showProbe by remember { mutableStateOf(false) }
                 val stats by Vp8StatsStore.flow.collectAsState()
                 val runningUi by Vp8StatsStore.running.collectAsState()
+                val hostConnected by Vp8StatsStore.hostConnected.collectAsState()
+                val stopReason by Vp8StatsStore.lastStopReason.collectAsState()
+                val context = LocalContext.current
 
-                // Autostart when host tool asks (works for onCreate AND onNewIntent)
                 LaunchedEffect(autostartNonce) {
                     if (autostartNonce > 0) {
+                        // optimistic UI (reduces “button highlighted” confusion)
+                        Vp8StatsStore.updateRunning(true)
+                        Vp8StatsStore.updateHostConnected(false)
+                        Vp8StatsStore.updateLastHostEventReason(null)
+                        Vp8StatsStore.updateStopReason(null)
                         launcher.launch(mpMgr.createScreenCaptureIntent())
                     }
                 }
@@ -224,11 +279,29 @@ class MainActivity : ComponentActivity() {
                                 if (runningUi) "Status: Running" else "Status: Stopped",
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                            Text(
+                                when {
+                                    !runningUi -> "Host: —"
+                                    hostConnected -> "Host: Connected"
+                                    else -> "Host: Waiting…"
+                                },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                            if (!runningUi && stopReason != null) {
+                                Text("Last stop: $stopReason", style = MaterialTheme.typography.bodySmall)
+                            }
 
                             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                 Button(
                                     enabled = !runningUi,
-                                    onClick = { launcher.launch(mpMgr.createScreenCaptureIntent()) }
+                                    onClick = {
+                                        // optimistic UI: disable Start immediately
+                                        Vp8StatsStore.updateRunning(true)
+                                        Vp8StatsStore.updateHostConnected(false)
+                                        Vp8StatsStore.updateLastHostEventReason(null)
+                                        Vp8StatsStore.updateStopReason(null)
+                                        launcher.launch(mpMgr.createScreenCaptureIntent())
+                                    }
                                 ) {
                                     Text("Start Mirroring")
                                 }
@@ -236,6 +309,12 @@ class MainActivity : ComponentActivity() {
                                 OutlinedButton(
                                     enabled = runningUi,
                                     onClick = {
+                                        // optimistic UI: reflect stop immediately
+                                        Vp8StatsStore.updateRunning(false)
+                                        Vp8StatsStore.updateHostConnected(false)
+                                        Vp8StatsStore.updateLastHostEventReason(null)
+                                        Vp8StatsStore.update(null)
+                                        Vp8StatsStore.updateStopReason("user_stop")
                                         stopService(Intent(this@MainActivity, Vp8IvfStreamService::class.java))
                                     }
                                 ) {
@@ -257,7 +336,7 @@ class MainActivity : ComponentActivity() {
                                     if (!runningUi) {
                                         Text("Not streaming.")
                                     } else if (stats == null) {
-                                        Text("No stats yet. Start mirroring and connect from the host tool.")
+                                        Text("Waiting for host to connect…")
                                     } else {
                                         val s = stats!!
                                         val sinceKfSec =
@@ -279,11 +358,23 @@ class MainActivity : ComponentActivity() {
                                 "Host tool will handle adb + playback/recording.",
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        cm.setPrimaryClip(ClipData.newPlainText("booxstream_debug_command", DEBUG_COMMAND))
+                                        Toast.makeText(context, "Command copied", Toast.LENGTH_SHORT).show()
+                                    }
+                                ) {
+                                    Text("Copy command")
+                                }
+                            }
                             SelectionContainer {
                                 Text(
-                                    "Example (for debugging only):\n" +
-                                        "adb forward --remove tcp:27183 2>/dev/null; adb forward tcp:27183 localabstract:booxstream_ivf\n" +
-                                        "ffplay -fflags nobuffer -flags low_delay -framedrop -f ivf -i tcp://127.0.0.1:27183",
+                                    "Example (for debugging only):\n$DEBUG_COMMAND",
                                     style = MaterialTheme.typography.bodySmall
                                 )
                             }

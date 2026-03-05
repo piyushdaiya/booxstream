@@ -32,6 +32,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.max
 import kotlin.math.min
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 
 class Vp8IvfStreamService : Service() {
 
@@ -55,6 +58,9 @@ class Vp8IvfStreamService : Service() {
         private const val FLUSH_EVERY_N_FRAMES = 12
         private const val REQUEST_SYNC_EVERY_MS = 1500L
 
+        // ---- NEW: stop if host disconnects and nobody reconnects ----
+        private const val STOP_IF_NO_CLIENT_MS = 5000L // tune as desired
+
         // Stats broadcast (optional)
         const val ACTION_VP8_STATS = "io.github.piyushdaiya.booxstream.ACTION_VP8_STATS"
         const val EXTRA_STATS_FPS = "fps_out"
@@ -71,6 +77,8 @@ class Vp8IvfStreamService : Service() {
         const val ACTION_VP8_STATE = "io.github.piyushdaiya.booxstream.ACTION_VP8_STATE"
         const val EXTRA_STATE_RUNNING = "running"
         const val EXTRA_STATE_REASON = "reason"
+        const val REASON_CLIENT_CONNECTED = "client_connected"
+        const val REASON_CLIENT_DISCONNECTED = "client_disconnected"
     }
 
     private val running = AtomicBoolean(false)
@@ -98,6 +106,10 @@ class Vp8IvfStreamService : Service() {
 
     @Volatile private var keyframeTickerRunning: Boolean = false
     @Volatile private var statsTickerRunning: Boolean = false
+
+    // ---- NEW: idle-stop ticker state ----
+    @Volatile private var idleStopTickerRunning: Boolean = false
+    @Volatile private var noClientDeadlineMs: Long = Long.MAX_VALUE
 
     // stats
     private val intervalFrames = AtomicLong(0)
@@ -156,6 +168,9 @@ class Vp8IvfStreamService : Service() {
                 codecThread = HandlerThread("booxstream-codec").apply { start() }
                 codecHandler = Handler(codecThread!!.looper)
 
+                // ---- NEW: start idle-stop ticker (host disconnect handling) ----
+                startIdleStopTicker()
+
                 // Start encoder FIRST (we can drop frames until a client connects)
                 startStatsTicker()
                 startEncoder(width, height, fps, bitrate)
@@ -164,6 +179,9 @@ class Vp8IvfStreamService : Service() {
                 server = LocalServerSocket(ABSTRACT_NAME)
                 Log.i(TAG, "LISTENING on localabstract:$ABSTRACT_NAME (use adb forward tcp:27183 localabstract:$ABSTRACT_NAME)")
                 updateNotification("Listening on localabstract:$ABSTRACT_NAME")
+
+                // If no host connects, auto-stop after timeout.
+                noClientDeadlineMs = SystemClock.elapsedRealtime() + STOP_IF_NO_CLIENT_MS
 
                 while (running.get()) {
                     val sock = server!!.accept() // blocks
@@ -187,11 +205,12 @@ class Vp8IvfStreamService : Service() {
     }
 
     private fun broadcastState(running: Boolean, reason: String) {
-        sendBroadcast(Intent(ACTION_VP8_STATE).apply {
-            putExtra(EXTRA_STATE_RUNNING, running)
-            putExtra(EXTRA_STATE_REASON, reason)
-        })
-    }
+    sendBroadcast(Intent(ACTION_VP8_STATE).apply {
+        setPackage(packageName)
+        putExtra(EXTRA_STATE_RUNNING, running)
+        putExtra(EXTRA_STATE_REASON, reason)
+    })
+}
 
     private fun attachNewClient(sock: LocalSocket, width: Int, height: Int, fps: Int) {
         synchronized(sinkLock) {
@@ -211,8 +230,12 @@ class Vp8IvfStreamService : Service() {
                 framesSinceFlush = 0
             )
 
+            // ---- NEW: we have a client, disable idle-stop deadline ----
+            noClientDeadlineMs = Long.MAX_VALUE
+
             Log.i(TAG, "IVF header written for new client: VP80 ${width}x$height timebase=1/$fps")
             updateNotification("Streaming VP8 IVF (adb forward tcp:27183 localabstract:$ABSTRACT_NAME)")
+            broadcastState(running = running.get(), reason = REASON_CLIENT_CONNECTED)
         }
     }
 
@@ -230,11 +253,42 @@ class Vp8IvfStreamService : Service() {
 
         keyframeTickerRunning = false
         statsTickerRunning = false
+        idleStopTickerRunning = false
+        noClientDeadlineMs = Long.MAX_VALUE
 
         synchronized(sinkLock) {
             try { sink?.socket?.close() } catch (_: Throwable) {}
             sink = null
         }
+    }
+
+    // ---- NEW: auto-stop if host disconnects and no reconnect for STOP_IF_NO_CLIENT_MS ----
+    private fun startIdleStopTicker() {
+        val h = codecHandler ?: return
+        if (idleStopTickerRunning) return
+        idleStopTickerRunning = true
+
+        h.post(object : Runnable {
+            override fun run() {
+                if (!running.get() || !idleStopTickerRunning) return
+
+                val hasClient = synchronized(sinkLock) { sink != null }
+                if (!hasClient) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now >= noClientDeadlineMs) {
+                        Log.i(TAG, "No host client for ${STOP_IF_NO_CLIENT_MS}ms -> stopping service")
+                        broadcastState(false, "idle_timeout")
+                        running.set(false)
+                        stopSelf()
+                        return
+                    }
+                } else {
+                    noClientDeadlineMs = Long.MAX_VALUE
+                }
+
+                h.postDelayed(this, 250L)
+            }
+        })
     }
 
     private fun startEncoder(width: Int, height: Int, fps: Int, bitrate: Int) {
@@ -345,10 +399,21 @@ class Vp8IvfStreamService : Service() {
         startKeyframeTicker()
     }
 
-    private fun detachClient() {
+    private fun detachClient(notifyHostState: Boolean = true) {
+        var hadClient = false
         synchronized(sinkLock) {
+            hadClient = sink != null
             try { sink?.socket?.close() } catch (_: Throwable) {}
             sink = null
+        }
+
+        if (hadClient) {
+            // ---- NEW: host disconnected; start idle-stop countdown ----
+            noClientDeadlineMs = SystemClock.elapsedRealtime() + STOP_IF_NO_CLIENT_MS
+            updateNotification("Waiting for host… (auto-stop in ${STOP_IF_NO_CLIENT_MS / 1000}s)")
+            if (notifyHostState) {
+                broadcastState(running = running.get(), reason = REASON_CLIENT_DISCONNECTED)
+            }
         }
     }
 
@@ -438,16 +503,17 @@ class Vp8IvfStreamService : Service() {
                 }
 
                 sendBroadcast(Intent(ACTION_VP8_STATS).apply {
-                    putExtra(EXTRA_STATS_FPS, fpsOut)
-                    putExtra(EXTRA_STATS_KBPS, kbpsOut)
-                    putExtra(EXTRA_STATS_FRAMES, totalFrames.get())
-                    putExtra(EXTRA_STATS_BYTES, totalBytes.get())
-                    putExtra(EXTRA_STATS_SINCE_KF_MS, sinceKf)
-                    putExtra(EXTRA_STATS_LAST_FRAME, lastFrameBytes.get())
-                    putExtra(EXTRA_STATS_DROPPED_PRE_KF, droppedBeforeKeyframe.get())
-                    putExtra(EXTRA_STATS_KEYFRAMES, keyframes.get())
-                    putExtra(EXTRA_STATS_ERRORS, writeErrors.get())
-                })
+    setPackage(packageName)
+    putExtra(EXTRA_STATS_FPS, fpsOut)
+    putExtra(EXTRA_STATS_KBPS, kbpsOut)
+    putExtra(EXTRA_STATS_FRAMES, totalFrames.get())
+    putExtra(EXTRA_STATS_BYTES, totalBytes.get())
+    putExtra(EXTRA_STATS_SINCE_KF_MS, sinceKf)
+    putExtra(EXTRA_STATS_LAST_FRAME, lastFrameBytes.get())
+    putExtra(EXTRA_STATS_DROPPED_PRE_KF, droppedBeforeKeyframe.get())
+    putExtra(EXTRA_STATS_KEYFRAMES, keyframes.get())
+    putExtra(EXTRA_STATS_ERRORS, writeErrors.get())
+})
 
                 h.postDelayed(this, 1000L)
             }
@@ -467,9 +533,18 @@ class Vp8IvfStreamService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_ID, buildNotification(text))
+    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    if (Build.VERSION.SDK_INT >= 33) {
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!granted) return
     }
+
+    nm.notify(NOTIF_ID, buildNotification(text))
+}
 
     private fun buildNotification(text: String): Notification {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
@@ -502,8 +577,9 @@ class Vp8IvfStreamService : Service() {
         running.set(false)
         stopKeyframeTicker()
         stopStatsTicker()
+        idleStopTickerRunning = false
 
-        detachClient()
+        detachClient(notifyHostState = false)
 
         try { server?.close() } catch (_: Throwable) {}
         server = null
