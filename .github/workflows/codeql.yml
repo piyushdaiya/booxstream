@@ -2,29 +2,38 @@ name: CodeQL
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [main]
   pull_request:
-    branches: [ "main" ]
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+  security-events: write
 
 jobs:
   analyze:
+    name: Analyze
     runs-on: ubuntu-latest
 
-    permissions:
-      contents: read
-      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - go
+          - java-kotlin
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: go
+          languages: ${{ matrix.language }}
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
 
-      - name: Analyze
+      - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3

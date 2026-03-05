@@ -1,58 +1,23 @@
 # Code of Conduct
 
-## Our Pledge
+This project aims to maintain a welcoming and respectful environment.
 
-We as members, contributors, and maintainers pledge to make participation
-in our community a harassment-free experience for everyone regardless of:
+Participants should:
 
-- age
-- body size
-- disability
-- ethnicity
-- gender identity
-- level of experience
-- nationality
-- personal appearance
-- race
-- religion
-- sexual identity and orientation
+- be respectful
+- be constructive
+- avoid harassment or personal attacks
 
 ---
 
-## Our Standards
+## Enforcement
 
-Examples of behavior that contributes to a positive environment include:
+Project maintainers may remove or edit content that violates this policy.
 
-- being respectful and inclusive
-- accepting constructive feedback
-- focusing on what is best for the community
-- showing empathy towards other contributors
-
-Examples of unacceptable behavior include:
-
-- harassment or discrimination
-- trolling or insulting comments
-- publishing private information without permission
-- any conduct inappropriate in a professional environment
-
----
-
-## Enforcement Responsibilities
-
-Project maintainers are responsible for clarifying and enforcing our
-standards of acceptable behavior.
+Repeated violations may result in removal from the project community.
 
 ---
 
 ## Reporting
 
-If you experience or witness unacceptable behavior, please contact
-the maintainers via GitHub issues or email.
-
----
-
-## Attribution
-
-This Code of Conduct is adapted from the
-Contributor Covenant, version 2.1.
-https://www.contributor-covenant.org
+If you experience unacceptable behavior, report it privately to the project maintainer.

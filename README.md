@@ -1,57 +1,168 @@
 # BooxStream
 
-![banner](docs/banner.png)
+<p align="center">
+<img src="docs/banner.png" width="800">
+</p>
 
-![CI](https://github.com/piyushdaiya/booxstream/actions/workflows/ci.yml/badge.svg)
-![Release](https://github.com/piyushdaiya/booxstream/actions/workflows/release.yml/badge.svg?branch=main&cachebust=1)
-![License](https://img.shields.io/github/license/piyushdaiya/booxstream)
-![GitHub release](https://img.shields.io/github/v/release/piyushdaiya/booxstream)
+<p align="center">
+
+[![CI](https://github.com/piyushdaiya/booxstream/actions/workflows/ci.yml/badge.svg)](https://github.com/piyushdaiya/booxstream/actions/workflows/ci.yml)
+![Release](https://github.com/piyushdaiya/booxstream/actions/workflows/release.yml/badge.svg)
+[![License](https://img.shields.io/github/license/piyushdaiya/booxstream)](LICENSE)
+[![GitHub Release](https://img.shields.io/github/v/release/piyushdaiya/booxstream)](https://github.com/piyushdaiya/booxstream/releases)
+![Downloads](https://img.shields.io/github/downloads/piyushdaiya/booxstream/total)
+
+</p>
+
+<p align="center">
 
 **Scrcpy-style screen mirroring optimized for Boox e-ink devices**
+
+</p>
+
+<p align="center">
 
 ![platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-blue)
 ![android](https://img.shields.io/badge/android-8%2B-green)
 ![language](https://img.shields.io/badge/host-Go-blue)
 
- --
+</p>
 
-## Overview
+---
+
+# Overview
 
 **BooxStream** is a lightweight screen mirroring system designed specifically for **Boox e-ink devices**.
 
 It works similarly to **scrcpy**, but focuses on the unique constraints of **e-ink displays**:
 
-- lower refresh rates
+- low refresh rates
 - reduced motion artifacts
+- minimal CPU usage
 - stable encoding on vendor Android builds
-- minimal overhead
 
-The system consists of two components:
+BooxStream consists of two components:
 
 ```
-Android APK  +  Host CLI tool
+Android App (BooxStream APK)
+Host Client (booxcpy CLI)
 ```
 
-The Android app captures the screen using **MediaProjection**, encodes it as **VP8**, and streams it to the host computer through **ADB port forwarding**.
+The Android app captures the screen via **MediaProjection**, encodes it using **VP8**, and streams the video through **ADB port forwarding**.
 
-The host tool (**booxcpy**) receives the stream and can display or record it.
+The host tool (**booxcpy**) receives the stream and can:
+
+- display the screen
+- record the stream
+- pipe the stream to external tools
 
 ---
 
-## Key Features
+# Demo
 
-- One-command mirroring
-- Works on **Windows / macOS / Linux**
-- **No root required**
-- Low-latency **VP8 streaming**
-- Optional **video recording**
-- Minimal Android UI
-- Host client written in **Go**
-- Compatible with standard tools like **ffplay**
+<p align="center">
+<img src="docs/screenshots/mirroring.png" width="800">
+</p>
 
 ---
 
-## Architecture
+# Installation
+
+Download the latest release from:
+
+https://github.com/piyushdaiya/booxstream/releases
+
+## Host Binary
+
+| Platform | Download |
+|--------|--------|
+| Linux x64 | `booxcpy-linux-amd64.tar.gz` |
+| macOS x64 | `booxcpy-darwin-amd64.tar.gz` |
+| Windows x64 | `booxcpy-windows-amd64.zip` |
+
+Extract and place the binary somewhere in your `PATH`.
+
+Example:
+
+```bash
+tar -xzf booxcpy-linux-amd64.tar.gz
+sudo mv booxcpy /usr/local/bin/
+```
+
+---
+
+## Install Android App
+
+Install the APK using adb:
+
+```bash
+adb install -r BooxStream-<version>-debug.apk
+```
+
+---
+
+# Quick Start
+
+Connect your Boox device via USB and run:
+
+```bash
+booxcpy
+```
+
+The device will prompt:
+
+```
+Start capturing?
+```
+
+Tap **Start now**.
+
+Your Boox screen should appear instantly.
+
+---
+
+# Recording
+
+Record the screen to a file:
+
+```bash
+booxcpy --record
+```
+
+Example output:
+
+```
+booxstream_20260304_171200.ivf
+```
+
+Custom filename:
+
+```bash
+booxcpy --record lecture.ivf
+```
+
+---
+
+# Command Line Options
+
+```
+booxcpy --help
+```
+
+Common options:
+
+```
+--record [file]     record stream
+--fps 12            override fps
+--bitrate 900000    override bitrate
+--size 1280x720     override resolution
+--serial DEVICE     choose adb device
+--no-play           record only
+```
+
+---
+
+# Architecture
 
 ```
 ┌────────────────────────────┐
@@ -87,168 +198,40 @@ The host tool (**booxcpy**) receives the stream and can display or record it.
 └────────────────────────────┘
 ```
 
-The host connects through **ADB port forwarding** and decodes the video stream locally.
-
----
-
-## Requirements
-
-### Computer
-
-You need:
+Detailed architecture:
 
 ```
-adb
-```
-
-Supported operating systems:
-
-- Windows
-- macOS
-- Linux
-
----
-
-### Boox Device
-
-Enable:
-
-```
-Developer Options
-USB Debugging
-```
-
-Then connect the device via USB.
-
----
-
-## Installation
-
-### Download Release
-
-Download the latest binaries from:
-
-https://github.com/piyushdaiya/booxstream/releases
-
-You will find:
-
-```
-booxstream.apk
-booxcpy-linux-amd64
-booxcpy-darwin-amd64
-booxcpy-windows-amd64.exe
+docs/ARCHITECTURE.md
 ```
 
 ---
 
-### Install the Android App
+# Screenshots
 
-```
-adb install -r booxstream.apk
-```
+### Mirroring
 
----
+<p align="center">
+<img src="docs/screenshots/mirroring.png" width="800">
+</p>
 
-## Quick Start
+### Android UI
 
-Start mirroring:
-
-```
-booxcpy
-```
-
-The Boox device will prompt:
-
-```
-Start capturing?
-```
-
-Tap:
-
-```
-Start now
-```
-
-The screen should appear instantly on your computer.
+<p align="center">
+<img src="docs/screenshots/android-ui.png" width="400">
+</p>
 
 ---
 
-## Recording
+# Debugging the Stream
 
-Record the stream:
-
-```
-booxcpy --record
-```
-
-Example output:
-
-```
-booxstream_20260304_171200.ivf
-```
-
-Specify custom filename:
-
-```
-booxcpy --record lecture.ivf
-```
-
----
-
-## Command Line Options
-
-```
-booxcpy --help
-```
-
-Common options:
-
-```
---record [file]     record stream
---fps 12            override FPS
---bitrate 900000    override bitrate
---size 1280x720     override resolution
---serial DEVICE     choose adb device
---no-play           record only
-```
-
-If bitrate is not specified, BooxStream selects a safe default automatically.
-
----
-
-## Android App UI
-
-The Android interface is intentionally minimal.
-
-Main buttons:
-
-```
-Start Mirroring
-Stop
-Advanced
-```
-
-Advanced menu provides:
-
-```
-Codec probe
-Streaming statistics
-```
-
-Most users only need **Start Mirroring**.
-
----
-
-## Debugging the Stream
-
-Developers can view the raw stream manually.
+Developers can inspect the raw stream manually.
 
 ```
 adb forward --remove tcp:27183 2>/dev/null
 adb forward tcp:27183 localabstract:booxstream_ivf
 ```
 
-Then play it with ffplay:
+Then play with ffplay:
 
 ```
 ffplay \
@@ -261,9 +244,9 @@ ffplay \
 
 ---
 
-## Build From Source
+# Build from Source
 
-### Android
+## Android
 
 ```
 cd android
@@ -278,22 +261,16 @@ android/app/build/outputs/apk/debug/
 
 ---
 
-### Host Tool
+## Host
 
 ```
 cd host/booxcpy
 go build
 ```
 
-Binary produced:
-
-```
-booxcpy
-```
-
 ---
 
-## Device Compatibility
+# Device Compatibility
 
 Primary target:
 
@@ -319,11 +296,9 @@ Kobo readers
 non-Android e-ink devices
 ```
 
-These devices cannot run Android APKs.
-
 ---
 
-## Security
+# Security
 
 BooxStream communicates through **ADB port forwarding**.
 
@@ -333,25 +308,32 @@ The forwarded port is bound to:
 127.0.0.1
 ```
 
-This means the stream is **not exposed to external networks**.
+No external network services are exposed.
+
+See:
+
+```
+SECURITY.md
+```
 
 ---
 
-## Roadmap
+# Contributing
 
-Planned improvements:
+Contributions are welcome.
 
-- built-in video player (remove ffplay dependency)
-- wireless ADB support
-- refresh-aware encoding for e-ink
-- WebRTC streaming option
-- package manager support (brew / apt / scoop)
+Please read:
+
+```
+CONTRIBUTING.md
+CODE_OF_CONDUCT.md
+```
 
 ---
 
-## License
+# License
 
-This project is licensed under the **Apache License 2.0**.
+Licensed under the **Apache License 2.0**.
 
 See:
 
@@ -362,9 +344,9 @@ NOTICE
 
 ---
 
-## Author
+# Author
 
-**Piyush Daiya**
+Piyush Daiya
 
 GitHub:
 
@@ -374,8 +356,14 @@ https://github.com/piyushdaiya
 
 ---
 
-## Inspiration
+# Inspiration
 
-This project is inspired by **scrcpy** by Genymobile.
+BooxStream is inspired by:
 
-BooxStream adapts the same philosophy specifically for **e-ink devices**.
+```
+scrcpy
+```
+
+by Genymobile.
+
+The project adapts the same philosophy specifically for **e-ink devices**.

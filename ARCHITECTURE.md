@@ -1,55 +1,66 @@
-# BooxStream Architecture
+# Architecture
 
-BooxStream consists of two main components:
-1. Android streaming service
-2. Host client (booxcpy)
+BooxStream consists of two components:
+
+```
+Android APK
+Host CLI (booxcpy)
+```
+---
+
+## Architecture Diagram
+![architecure](/docs/architecture-diagram.png)
+---
+
+## Android Side
+
+The Android application:
+
+1. Starts MediaProjection
+2. Captures screen frames
+3. Encodes frames using VP8
+4. Writes IVF stream
+5. Publishes stream to a local socket
+
+```
+localabstract:booxstream_ivf
+```
 
 ---
 
-## Overview
+## Host Side
 
-Android Device (MediaProjection + Encoder)
-  -> ADB Port Forward
-  -> Host Client (booxcpy)
-  -> Decoder / Player
+The host application:
+
+1. launches the Android streaming service
+2. creates ADB forwarding
+
+```
+adb forward tcp:27183 localabstract:booxstream_ivf
+```
+
+3. reads IVF stream
+4. displays or records the video
 
 ---
 
-## Android Pipeline
+## Data Flow
 
+```
 MediaProjection
--> Surface capture
--> Hardware encoder (VP8)
--> IVF stream
--> Local socket (localabstract)
-
----
-
-## Host Pipeline
-
-adb forward
--> TCP stream
--> IVF parser
--> playback (ffplay) and/or recording
-
----
-
-## Modules
-
-Android:
-- stream/
-- codec/
-- ui/
-
-Host:
-- host/booxcpy (CLI)
-- adb helpers
-- stream reader / recorder
-
----
-
-## Goals
-- low latency
-- minimal dependencies
-- simple architecture
-- cross-platform host client
+      │
+      ▼
+VP8 Encoder
+      │
+      ▼
+IVF Stream
+      │
+      ▼
+Local Socket
+      │
+      ▼
+ADB Forward
+      │
+      ▼
+booxcpy
+```

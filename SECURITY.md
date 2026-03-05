@@ -1,34 +1,20 @@
 # Security Policy
 
-## Supported Versions
+If you discover a security vulnerability in BooxStream, please report it privately.
 
-Security updates will be provided for the latest release.
-
-Version: latest
-Supported: yes
+Do **not** open a public issue.
 
 ---
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in BooxStream:
-1. Do NOT open a public issue
-2. Contact the maintainers privately
-
-You can report vulnerabilities through:
-- GitHub Security Advisories
-- Maintainer contact on GitHub
-
----
-
-## What to Include
-
 Please include:
-- description of the vulnerability
+
+- vulnerability description
 - reproduction steps
 - potential impact
-- suggested mitigation if known
 
----
+Preferred reporting methods:
 
-Responsible disclosure is appreciated.
+- GitHub Security Advisory
+- private contact with the project maintainer

@@ -18,9 +18,30 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+    create("release") {
+        val ksPath = System.getenv("ANDROID_KEYSTORE_PATH")
+        val ksPass = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+        val keyAliasEnv = System.getenv("ANDROID_KEY_ALIAS")
+        val keyPass = System.getenv("ANDROID_KEY_PASSWORD")
+
+        val ok = !ksPath.isNullOrBlank()
+            && !ksPass.isNullOrBlank()
+            && !keyAliasEnv.isNullOrBlank()
+            && !keyPass.isNullOrBlank()
+
+        if (ok) {
+            storeFile = file(ksPath)
+            storePassword = ksPass
+            keyAlias = keyAliasEnv
+            this.keyPassword = keyPass
+        }
+    }
+}
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
         debug {
             isMinifyEnabled = false
