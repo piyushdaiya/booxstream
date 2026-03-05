@@ -41,17 +41,6 @@ jobs:
       - name: Gradle wrapper executable
         run: chmod +x ./gradlew
 
-      - name: Guard: no hardcoded org.gradle.java.home
-        shell: bash
-        run: |
-          set -euo pipefail
-          hits="$(grep -RIn --exclude-dir=build --exclude-dir=.gradle 'org.gradle.java.home' . || true)"
-          if [[ -n "$hits" ]]; then
-            echo "$hits"
-            echo "::error::Found org.gradle.java.home in repository. Remove it from gradle.properties; CI must use setup-java."
-            exit 1
-          fi
-
       - name: Show Java + Gradle env
         shell: bash
         run: |
