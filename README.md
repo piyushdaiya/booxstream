@@ -3,7 +3,7 @@
 ![banner](docs/banner.png)
 
 ![CI](https://github.com/piyushdaiya/booxstream/actions/workflows/ci.yml/badge.svg)
-![Release](https://github.com/piyushdaiya/booxstream/actions/workflows/release.yml/badge.svg)
+![Release](https://github.com/piyushdaiya/booxstream/actions/workflows/release.yml/badge.svg?branch=main&cachebust=1)
 ![License](https://img.shields.io/github/license/piyushdaiya/booxstream)
 ![GitHub release](https://img.shields.io/github/v/release/piyushdaiya/booxstream)
 
