@@ -1,0 +1,44 @@
+name: Bug Report
+description: Report a bug in BooxStream
+labels: ["bug"]
+
+body:
+  - type: input
+    id: device
+    attributes:
+      label: Device Model
+      placeholder: "Boox Note Air 3"
+    validations:
+      required: true
+
+  - type: input
+    id: android
+    attributes:
+      label: Android Version
+      placeholder: "13"
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host OS
+      placeholder: "macOS / Linux / Windows"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: "What did you do? What did you expect? What happened?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "Paste relevant adb/booxcpy output if available."
+    validations:
+      required: false
