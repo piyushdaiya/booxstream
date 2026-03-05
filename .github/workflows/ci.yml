@@ -50,17 +50,26 @@ jobs:
           java -version
           ./gradlew -version
 
+      # IMPORTANT: override any org.gradle.java.home accidentally committed locally
       - name: Unit tests (:core)
-        run: ./gradlew :core:test --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :core:test --stacktrace
 
       - name: Unit tests (:app)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: Lint (:app)
-        run: ./gradlew :app:lintDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :app:lintDebug --stacktrace
 
       - name: Assemble Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -123,7 +132,8 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go test ./... -v
 
-      - name: Build booxcpy (unix)
+      # Build + package on Linux/macOS
+      - name: Build + package booxcpy (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         env:
@@ -132,27 +142,33 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist pkg
-          go build -trimpath -ldflags="-s -w" -o dist/booxcpy .
+
           GOOS="$(go env GOOS)"
           BIN="booxcpy-${GOOS}-${GOARCH}"
-          mv dist/booxcpy "dist/${BIN}"
+
+          go build -trimpath -ldflags="-s -w" -o "dist/${BIN}" .
           tar -czf "pkg/${BIN}.tar.gz" -C dist "${BIN}"
+
           ls -lh dist pkg
 
-      - name: Build booxcpy (windows)
+      # Build + package on Windows (no zip dependency)
+      - name: Build + package booxcpy (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
           $goos = (go env GOOS)
           $bin = "booxcpy-$goos-$env:GOARCH.exe"
           $zip = "booxcpy-$goos-$env:GOARCH.zip"
 
           New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
-          Move-Item -Force dist\booxcpy.exe dist\$bin
 
-          Compress-Archive -Path "dist\$bin" -DestinationPath "pkg\$zip" -Force
+          # Build the exe explicitly (Go won't auto-append .exe if -o has no extension)
+          go build -trimpath -ldflags="-s -w" -o ("dist\" + $bin) .
+
+          Compress-Archive -Path ("dist\" + $bin) -DestinationPath ("pkg\" + $zip) -Force
 
           Get-ChildItem dist
           Get-ChildItem pkg

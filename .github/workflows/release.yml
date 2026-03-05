@@ -45,18 +45,25 @@ jobs:
           java -version
           ./gradlew -version
 
-      # ✅ Unit tests + lint
       - name: Unit tests (:core)
-        run: ./gradlew :core:test --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :core:test --stacktrace
 
       - name: Unit tests (:app)
-        run: ./gradlew :app:testDebugUnitTest --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
 
       - name: Lint (:app)
-        run: ./gradlew :app:lintDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :app:lintDebug --stacktrace
 
       - name: Assemble Debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+        env:
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        run: ./gradlew :app:assembleDebug --stacktrace
 
       - name: Stash APK
         shell: bash
@@ -105,45 +112,45 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go test ./... -v
 
-      - name: Build booxcpy
-        env:
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          mkdir -p ../../release-dist
-          go build -trimpath -ldflags="-s -w" -o ../../release-dist/booxcpy .
-
-      - name: Package booxcpy (Linux/macOS)
+      - name: Build + package booxcpy (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
         env:
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
           set -euo pipefail
+          mkdir -p ../../release-dist
+
           GOOS="$(go env GOOS)"
           BIN="booxcpy-${GOOS}-${GOARCH}"
-          mv ../../release-dist/booxcpy "../../release-dist/${BIN}"
+
+          go build -trimpath -ldflags="-s -w" -o "../../release-dist/${BIN}" .
           (cd ../../release-dist && tar -czf "${BIN}.tar.gz" "${BIN}")
           rm -f "../../release-dist/${BIN}"
+
           ls -lh ../../release-dist
 
-      - name: Package booxcpy (Windows)
+      - name: Build + package booxcpy (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         env:
           GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: |
           $goos = (go env GOOS)
           $bin = "booxcpy-$goos-$env:GOARCH.exe"
           $zip = "booxcpy-$goos-$env:GOARCH.zip"
 
-          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
-          Move-Item -Force dist\booxcpy.exe dist\$bin
+          New-Item -ItemType Directory -Force -Path ..\..\release-dist | Out-Null
 
-          Compress-Archive -Path "dist\$bin" -DestinationPath "pkg\$zip" -Force
+          # Build the exe explicitly into release-dist
+          go build -trimpath -ldflags="-s -w" -o ("..\..\release-dist\" + $bin) .
 
-          Get-ChildItem dist
-          Get-ChildItem pkg
+          Compress-Archive -Path ("..\..\release-dist\" + $bin) -DestinationPath ("..\..\release-dist\" + $zip) -Force
+          Remove-Item -Force ("..\..\release-dist\" + $bin)
+
+          Get-ChildItem ..\..\release-dist
 
       - name: Upload booxcpy packages (for publish job)
         uses: actions/upload-artifact@v4
