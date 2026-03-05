@@ -2,10 +2,9 @@ name: CI (Android + Go)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request: {}
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -18,9 +17,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
+        os: [ubuntu-latest, macos-latest]
 
     defaults:
       run:
@@ -71,11 +68,20 @@ jobs:
           ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
         run: ./gradlew :app:assembleDebug --stacktrace
 
+      - name: Stash APK into workspace dist/
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/dist/android/${{ runner.os }}"
+          cp app/build/outputs/apk/debug/app-debug.apk \
+            "${GITHUB_WORKSPACE}/dist/android/${{ runner.os }}/BooxStream-ci-debug.apk"
+          ls -lh "${GITHUB_WORKSPACE}/dist/android/${{ runner.os }}"
+
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-debug-${{ runner.os }}
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: dist/android/${{ runner.os }}/*.apk
           if-no-files-found: error
 
       - name: Upload Lint report (optional)
@@ -91,8 +97,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-test-reports-${{ runner.os }}
-          path: |
-            android/**/build/reports/tests/**
+          path: android/**/build/reports/tests/**
           if-no-files-found: warn
 
   go:
@@ -101,13 +106,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
-        goarch:
-          - amd64
-          - arm64
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        goarch: [amd64, arm64]
         exclude:
           - os: windows-latest
             goarch: arm64
@@ -132,7 +132,6 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: go test ./... -v
 
-      # Build + package on Linux/macOS
       - name: Build + package booxcpy (Linux/macOS)
         if: runner.os != 'Windows'
         shell: bash
@@ -141,17 +140,18 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          mkdir -p dist pkg
+
+          OUTDIR="${GITHUB_WORKSPACE}/dist/go/${{ runner.os }}-${{ matrix.goarch }}"
+          mkdir -p "${OUTDIR}"
 
           GOOS="$(go env GOOS)"
           BIN="booxcpy-${GOOS}-${GOARCH}"
 
-          go build -trimpath -ldflags="-s -w" -o "dist/${BIN}" .
-          tar -czf "pkg/${BIN}.tar.gz" -C dist "${BIN}"
+          go build -trimpath -ldflags="-s -w" -o "${OUTDIR}/${BIN}" .
+          (cd "${OUTDIR}" && tar -czf "${BIN}.tar.gz" "${BIN}" && rm -f "${BIN}")
 
-          ls -lh dist pkg
+          ls -lh "${OUTDIR}"
 
-      # Build + package on Windows (no zip dependency)
       - name: Build + package booxcpy (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
@@ -159,30 +159,23 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
+          $outDir = Join-Path $env:GITHUB_WORKSPACE "dist\go\${{ runner.os }}-${{ matrix.goarch }}"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
           $goos = (go env GOOS)
           $bin = "booxcpy-$goos-$env:GOARCH.exe"
           $zip = "booxcpy-$goos-$env:GOARCH.zip"
 
-          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
+          go build -trimpath -ldflags="-s -w" -o (Join-Path $outDir $bin) .
 
-          # Build the exe explicitly (Go won't auto-append .exe if -o has no extension)
-          go build -trimpath -ldflags="-s -w" -o ("dist\" + $bin) .
+          Compress-Archive -Path (Join-Path $outDir $bin) -DestinationPath (Join-Path $outDir $zip) -Force
+          Remove-Item -Force (Join-Path $outDir $bin)
 
-          Compress-Archive -Path ("dist\" + $bin) -DestinationPath ("pkg\" + $zip) -Force
-
-          Get-ChildItem dist
-          Get-ChildItem pkg
-
-      - name: Upload booxcpy binary artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: booxcpy-bin-${{ runner.os }}-${{ matrix.goarch }}
-          path: host/booxcpy/dist/*
-          if-no-files-found: error
+          Get-ChildItem $outDir
 
       - name: Upload booxcpy package artifact
         uses: actions/upload-artifact@v4
         with:
           name: booxcpy-pkg-${{ runner.os }}-${{ matrix.goarch }}
-          path: host/booxcpy/pkg/*
+          path: dist/go/${{ runner.os }}-${{ matrix.goarch }}/*
           if-no-files-found: error

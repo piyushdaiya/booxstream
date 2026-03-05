@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -46,38 +47,30 @@ jobs:
           ./gradlew -version
 
       - name: Unit tests (:core)
-        env:
-          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
-        run: ./gradlew :core:test --stacktrace
+        run: ./gradlew :core:test --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Unit tests (:app)
-        env:
-          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
-        run: ./gradlew :app:testDebugUnitTest --stacktrace
+        run: ./gradlew :app:testDebugUnitTest --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Lint (:app)
-        env:
-          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
-        run: ./gradlew :app:lintDebug --stacktrace
+        run: ./gradlew :app:lintDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
       - name: Assemble Debug APK
-        env:
-          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
-        run: ./gradlew :app:assembleDebug --stacktrace
+        run: ./gradlew :app:assembleDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
 
-      - name: Stash APK
+      - name: Stash APK into workspace dist/
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ../release-dist
-          cp app/build/outputs/apk/debug/app-debug.apk ../release-dist/BooxStream-${{ github.ref_name }}-debug.apk
-          ls -lh ../release-dist
+          mkdir -p "${GITHUB_WORKSPACE}/dist"
+          cp app/build/outputs/apk/debug/app-debug.apk "${GITHUB_WORKSPACE}/dist/BooxStream-${GITHUB_REF_NAME}-debug.apk"
+          ls -lh "${GITHUB_WORKSPACE}/dist"
 
       - name: Upload APK artifact (for publish job)
         uses: actions/upload-artifact@v4
         with:
           name: release-apk
-          path: android/release-dist/*.apk
+          path: dist/*.apk
           if-no-files-found: error
 
   build-go:
@@ -120,16 +113,15 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          mkdir -p ../../release-dist
+          OUTDIR="${GITHUB_WORKSPACE}/dist/go/${{ runner.os }}-${{ matrix.goarch }}"
+          mkdir -p "${OUTDIR}"
 
           GOOS="$(go env GOOS)"
           BIN="booxcpy-${GOOS}-${GOARCH}"
 
-          go build -trimpath -ldflags="-s -w" -o "../../release-dist/${BIN}" .
-          (cd ../../release-dist && tar -czf "${BIN}.tar.gz" "${BIN}")
-          rm -f "../../release-dist/${BIN}"
-
-          ls -lh ../../release-dist
+          go build -trimpath -ldflags="-s -w" -o "${OUTDIR}/${BIN}" .
+          (cd "${OUTDIR}" && tar -czf "${BIN}.tar.gz" "${BIN}" && rm -f "${BIN}")
+          ls -lh "${OUTDIR}"
 
       - name: Build + package booxcpy (Windows)
         if: runner.os == 'Windows'
@@ -138,25 +130,25 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
+          $outDir = Join-Path $env:GITHUB_WORKSPACE "dist\go\${{ runner.os }}-${{ matrix.goarch }}"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
           $goos = (go env GOOS)
           $bin = "booxcpy-$goos-$env:GOARCH.exe"
           $zip = "booxcpy-$goos-$env:GOARCH.zip"
 
-          New-Item -ItemType Directory -Force -Path ..\..\release-dist | Out-Null
+          go build -trimpath -ldflags="-s -w" -o (Join-Path $outDir $bin) .
 
-          # Build the exe explicitly into release-dist
-          go build -trimpath -ldflags="-s -w" -o ("..\..\release-dist\" + $bin) .
+          Compress-Archive -Path (Join-Path $outDir $bin) -DestinationPath (Join-Path $outDir $zip) -Force
+          Remove-Item -Force (Join-Path $outDir $bin)
 
-          Compress-Archive -Path ("..\..\release-dist\" + $bin) -DestinationPath ("..\..\release-dist\" + $zip) -Force
-          Remove-Item -Force ("..\..\release-dist\" + $bin)
-
-          Get-ChildItem ..\..\release-dist
+          Get-ChildItem $outDir
 
       - name: Upload booxcpy packages (for publish job)
         uses: actions/upload-artifact@v4
         with:
           name: release-booxcpy-${{ runner.os }}-${{ matrix.goarch }}
-          path: host/release-dist/*
+          path: dist/go/${{ runner.os }}-${{ matrix.goarch }}/*
           if-no-files-found: error
 
   publish:
