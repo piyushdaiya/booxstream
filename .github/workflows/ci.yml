@@ -144,15 +144,18 @@ jobs:
         shell: pwsh
         env:
           GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
         run: |
-          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
-          go build -trimpath -ldflags="-s -w" -o dist\booxcpy.exe .
           $goos = (go env GOOS)
           $bin = "booxcpy-$goos-$env:GOARCH.exe"
+          $zip = "booxcpy-$goos-$env:GOARCH.zip"
+
+          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
           Move-Item -Force dist\booxcpy.exe dist\$bin
-          Compress-Archive -Path dist\$bin -DestinationPath pkg\("booxcpy-$goos-$env:GOARCH.zip") -Force
-          Get-ChildItem dist,pkg
+
+          Compress-Archive -Path "dist\$bin" -DestinationPath "pkg\$zip" -Force
+
+          Get-ChildItem dist
+          Get-ChildItem pkg
 
       - name: Upload booxcpy binary artifact
         uses: actions/upload-artifact@v4

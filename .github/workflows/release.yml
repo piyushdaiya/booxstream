@@ -135,11 +135,15 @@ jobs:
         run: |
           $goos = (go env GOOS)
           $bin = "booxcpy-$goos-$env:GOARCH.exe"
-          if (!(Test-Path "..\..\release-dist")) { New-Item -ItemType Directory -Force -Path "..\..\release-dist" | Out-Null }
-          Move-Item -Force ..\..\release-dist\booxcpy.exe ..\..\release-dist\$bin
-          Compress-Archive -Path ..\..\release-dist\$bin -DestinationPath ..\..\release-dist\("booxcpy-$goos-$env:GOARCH.zip") -Force
-          Remove-Item -Force ..\..\release-dist\$bin
-          Get-ChildItem ..\..\release-dist
+          $zip = "booxcpy-$goos-$env:GOARCH.zip"
+
+          New-Item -ItemType Directory -Force -Path dist,pkg | Out-Null
+          Move-Item -Force dist\booxcpy.exe dist\$bin
+
+          Compress-Archive -Path "dist\$bin" -DestinationPath "pkg\$zip" -Force
+
+          Get-ChildItem dist
+          Get-ChildItem pkg
 
       - name: Upload booxcpy packages (for publish job)
         uses: actions/upload-artifact@v4
