@@ -249,13 +249,13 @@ jobs:
 
     steps:
       - name: Download Android artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-android
           path: dist
 
       - name: Download Go artifacts (all)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-go-*
           merge-multiple: true
