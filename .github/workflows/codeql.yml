@@ -6,34 +6,73 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 3 * * 1'
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
   security-events: write
 
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   analyze:
-    name: Analyze
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-latest
-
     strategy:
       fail-fast: false
       matrix:
-        language:
-          - go
-          - java-kotlin
+        language: [go, java-kotlin]
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
 
-      - name: Autobuild
-        uses: github/codeql-action/autobuild@v3
+      # ---- Manual build for Java/Kotlin (Android) ----
+      - name: Set up JDK (Temurin 21)
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle cache
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build Android (for CodeQL extraction)
+        if: matrix.language == 'java-kotlin'
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :app:assembleDebug --stacktrace -Dorg.gradle.java.home="$JAVA_HOME"
+
+      # ---- Manual build for Go ----
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: true
+          cache-dependency-path: host/booxcpy/go.sum
+
+      - name: Build Go (for CodeQL extraction)
+        if: matrix.language == 'go'
+        working-directory: host/booxcpy
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build ./...
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"
