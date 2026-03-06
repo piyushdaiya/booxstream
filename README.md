@@ -402,4 +402,11 @@ scrcpy
 
 by Genymobile.
 
+## Trademark Notice
+
+BOOX is a trademark of Onyx International Inc.
+
+BooxStream is an independent open-source project and is not affiliated with,
+endorsed by, or sponsored by Onyx International Inc.
+
 The project adapts the same philosophy specifically for **e-ink devices**.
