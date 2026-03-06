@@ -284,9 +284,16 @@ func parseSize(s string) (int, int, error) {
 	if m == nil {
 		return 0, 0, fmt.Errorf("invalid --size %q, expected WxH like 1280x720", s)
 	}
+
 	var w, h int
-	fmt.Sscanf(m[1], "%d", &w)
-	fmt.Sscanf(m[2], "%d", &h)
+
+	if n, err := fmt.Sscanf(m[1], "%d", &w); err != nil || n != 1 {
+		return 0, 0, fmt.Errorf("invalid width in --size %q", s)
+	}
+	if n, err := fmt.Sscanf(m[2], "%d", &h); err != nil || n != 1 {
+		return 0, 0, fmt.Errorf("invalid height in --size %q", s)
+	}
+
 	if w < 320 || h < 320 {
 		return 0, 0, fmt.Errorf("size too small: %dx%d", w, h)
 	}
