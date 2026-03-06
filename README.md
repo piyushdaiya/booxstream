@@ -57,10 +57,191 @@ The host tool (**booxcpy**) receives the stream and can:
 - pipe the stream to external tools
 
 ---
+---
 
+# Why BooxStream Exists
+
+BooxStream was created to solve a practical problem when working with **Boox e-ink tablets**.
+
+While tools like **scrcpy** work extremely well for normal Android devices, they are not optimized for the unique characteristics of **e-ink displays**.
+
+E-ink screens behave very differently from LCD/OLED screens:
+
+- refresh rates are very low
+- partial refresh and ghosting occur frequently
+- video pipelines optimized for 60fps displays waste CPU
+- vendor Android builds sometimes have unstable encoders
+
+As a result, using generic mirroring tools can lead to:
+
+- unnecessary CPU usage
+- unstable frame delivery
+- high latency
+- poor compatibility with vendor firmware
+
+BooxStream focuses specifically on **low-refresh-rate mirroring** for e-ink devices.
+
+---
+
+# Why Not Just Use scrcpy?
+
+`scrcpy` is an excellent Android mirroring tool and inspired this project.
+
+However, scrcpy is designed for **general Android devices**, and its architecture is optimized for:
+
+- real-time H264 video streaming
+- high frame rate displays
+- GPU accelerated rendering
+- interactive input control
+
+For e-ink tablets these assumptions are not always ideal.
+
+### Limitations when used with Boox devices
+
+1. **High refresh assumptions**
+
+scrcpy assumes continuous frame updates and attempts to maintain high frame throughput.
+
+E-ink displays typically refresh at **5–15 fps**, so the additional complexity of real-time streaming is unnecessary.
+
+---
+
+2. **Codec constraints**
+
+scrcpy uses **H264** for streaming.
+
+Some vendor Android builds on e-ink devices provide:
+
+- unstable H264 encoders
+- inconsistent hardware codec behavior
+- limited bitrate control
+
+Using **VP8** provides a simpler and more predictable encoding path on these devices.
+
+---
+
+3. **Stream transport complexity**
+
+scrcpy sends a custom framed video stream.
+
+While efficient, the format is not easily consumed by standard multimedia tools.
+
+BooxStream instead uses **IVF containerized VP8**, which is supported directly by tools like:
+
+- `ffplay`
+- `ffmpeg`
+- `mpv`
+
+This makes debugging and recording significantly easier.
+
+---
+
+# Why IVF for the Video Stream?
+
+BooxStream streams VP8 frames inside an **IVF container**.
+
+IVF (Indeo Video Format) is a simple container commonly used for VP8/VP9 streams.
+
+Advantages:
+
+- extremely simple format
+- minimal framing overhead
+- easy to parse
+- supported directly by FFmpeg and many players
+
+Example:
+
+```
+ffplay -f ivf stream.ivf
+```
+
+Using IVF allows BooxStream to:
+
+- avoid writing a custom demuxer
+- simplify debugging
+- make recording trivial
+- integrate with existing video tools
+
+---
+
+# Why an Android App is Required
+
+Unlike scrcpy, BooxStream runs a small **Android companion app** on the device.
+
+This app handles:
+
+- MediaProjection screen capture
+- VP8 encoding
+- streaming frames over a local socket
+
+The host tool (`booxcpy`) then connects through **ADB port forwarding**.
+
+Architecture overview:
+
+```
+Host Computer
+     │
+     │ adb forward
+     ▼
+booxcpy (Go)
+     │
+     ▼
+BooxStream Android App
+     │
+MediaProjection
+     │
+VP8 Encoder
+     │
+IVF stream
+```
+
+Separating responsibilities provides several advantages:
+
+- simpler host implementation
+- easier debugging
+- Android-side control over encoder settings
+- compatibility across different host operating systems
+
+---
+
+# Design Goals
+
+BooxStream was built with a few core goals:
+
+- **simple architecture**
+- **low latency for e-ink refresh rates**
+- **minimal CPU usage**
+- **cross-platform host client**
+- **easy integration with FFmpeg tools**
+
+The project intentionally keeps the host client lightweight and pushes device-specific logic into the Android app.
+
+---
+
+# Project Structure
+
+```
+android/        BooxStream Android application
+host/booxcpy    Go CLI client
+docs/           documentation and architecture diagrams
+```
+
+---
+
+# Inspiration
+
+BooxStream is heavily inspired by the architecture of [**scrcpy**](https://github.com/Genymobile/scrcpy) 
+by Genymobile.
+
+The goal is not to replace scrcpy, but to explore a **simpler streaming pipeline optimized for e-ink devices**.
+
+---
 # Demo
 
-Comming Soon!
+Boox Leaf3C Videos
+- [ivf format](/demos/booxstream_Leaf3C.ivf)
+- [mkv format](/demos/booxstream_Leaf3C.mkv) (converted from ivf format for demo purposes)
+- [m4a format](/demos/booxstream_Leaf3C.m4a) (converted from ivf format for demo purposes)
 ---
 
 # Installation
@@ -384,16 +565,6 @@ https://github.com/piyushdaiya
 ```
 
 ---
-
-# Inspiration
-
-BooxStream is inspired by:
-
-
-[scrcpy](https://github.com/Genymobile/scrcpy)
-
-
-by Genymobile.
 
 ## Trademark Notice
 
