@@ -1,0 +1,325 @@
+name: Release (APK + booxcpy)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Ref to build (tag like v0.1.0, branch, or commit SHA). Default: main"
+        required: false
+        default: "main"
+        type: string
+
+# Default: no permissions. Grant per-job.
+permissions: {}
+
+concurrency:
+  group: release-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # If this is a tag push, use tag. If manual, use inputs.ref.
+  RELEASE_REF: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.ref }}
+  # Release tag name (used for naming artifacts). If manual and not a tag, use short SHA.
+  RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('manual-{0}', github.sha) }}
+
+  TZ: UTC
+  LC_ALL: C
+  LANG: C
+
+jobs:
+  build-android:
+    name: Android (release APK) - ubuntu
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          # We want tags available (useful for versioning / correctness)
+          fetch-depth: 0
+
+      - name: Set up JDK (Temurin 21)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      # Optional: require signing secrets on tag builds (recommended)
+      - name: Guard signing secrets on tag builds (optional)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for v in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!v:-}" ]]; then
+              echo "::error::Missing required secret: $v"
+              missing=1
+            fi
+          done
+          if [[ "$missing" -eq 1 ]]; then
+            echo "::error::Tag builds should be signed. Add the missing secrets or remove this guard."
+            exit 1
+          fi
+
+      - name: Prepare Android signing keystore (optional)
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${ANDROID_KEYSTORE_BASE64:-}" ]]; then
+            echo "No ANDROID_KEYSTORE_BASE64 secret found; release APK will be unsigned."
+            exit 0
+          fi
+
+          KEYSTORE_PATH="$RUNNER_TEMP/booxstream-release.keystore"
+          printf "%s" "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+
+      - name: Build + test + lint + assembleRelease
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # ✅ Force Java home used by Gradle, even if a bad org.gradle.java.home exists in some file
+          ORG_GRADLE_PROJECT_org_gradle_java_home: ${{ env.JAVA_HOME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew \
+            :core:test \
+            :app:testDebugUnitTest \
+            :app:lintDebug \
+            :app:assembleRelease \
+            --stacktrace
+
+      - name: Verify APK signature (optional)
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [[ ! -f "$APK" ]]; then
+            APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          fi
+
+          if [[ ! -f "$APK" ]]; then
+            echo "::error::No release APK found."
+            ls -R app/build/outputs/apk || true
+            exit 1
+          fi
+
+          echo "Verifying: $APK"
+          "$JAVA_HOME/bin/jarsigner" -verify -verbose -certs "$APK" | head -n 120 || true
+
+      - name: Collect Release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/dist"
+
+          APK="app/build/outputs/apk/release/app-release.apk"
+          if [[ ! -f "$APK" ]]; then
+            APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          fi
+
+          if [[ ! -f "$APK" ]]; then
+            echo "::error::Release APK not found."
+            ls -R app/build/outputs/apk || true
+            exit 1
+          fi
+
+          cp "$APK" "${GITHUB_WORKSPACE}/dist/BooxStream-${RELEASE_TAG}-release.apk"
+          ls -lh "${GITHUB_WORKSPACE}/dist"
+
+      - name: Upload Android artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-android
+          path: ${{ github.workspace }}/dist/*.apk
+          if-no-files-found: error
+
+  build-go:
+    name: Go (booxcpy) - ${{ matrix.os }} / ${{ matrix.goarch }}
+    runs-on: ${{ matrix.os }}
+
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        goarch: [amd64, arm64]
+        exclude:
+          - os: windows-latest
+            goarch: arm64
+
+    defaults:
+      run:
+        working-directory: host/booxcpy
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_REF }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23.x"
+          cache: true
+          cache-dependency-path: host/booxcpy/go.sum
+
+      - name: Test
+        env:
+          GOARCH: ${{ matrix.goarch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./... -v
+
+      - name: Build + package (Linux/macOS) deterministic tar.gz
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+
+          OUT="${GITHUB_WORKSPACE}/dist"
+          mkdir -p "$OUT"
+
+          GOOS="$(go env GOOS)"
+          BIN="booxcpy-${GOOS}-${GOARCH}"
+
+          go build -trimpath -buildvcs=false -ldflags="-s -w" -o "$OUT/${BIN}" .
+
+          # macOS uses BSD tar -> install GNU tar
+          TAR_BIN="tar"
+
+          if [[ "${RUNNER_OS}" == "macOS" ]]; then
+            brew install gnu-tar
+            TAR_BIN="gtar"
+          fi
+
+          "$TAR_BIN" \
+          --sort=name \
+          --owner=0 \
+          --group=0 \
+          --numeric-owner \
+          --mtime='UTC 1970-01-01' \
+          -czf "$OUT/${BIN}.tar.gz" -C "$OUT" "$BIN"
+
+          rm -f "$OUT/$BIN"
+
+          ls -lh "$OUT"
+
+      - name: Build + package (Windows) zip
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+
+          $goos = (go env GOOS)
+          $bin = "booxcpy-$goos-$env:GOARCH.exe"
+          $zip = "booxcpy-$goos-$env:GOARCH.zip"
+
+          go build -trimpath -buildvcs=false -ldflags="-s -w" -o (Join-Path $out $bin) .
+          Compress-Archive -Path (Join-Path $out $bin) -DestinationPath (Join-Path $out $zip) -Force
+          Remove-Item -Force (Join-Path $out $bin)
+
+          Get-ChildItem $out
+
+      - name: Upload Go artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-go-${{ runner.os }}-${{ matrix.goarch }}
+          path: ${{ github.workspace }}/dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-android, build-go]
+    # Only publish to GitHub Releases on tag pushes.
+    # (Manual runs are allowed to build artifacts, but won't create a release.)
+    if: startsWith(github.ref, 'refs/tags/')
+
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Download Android artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: release-android
+          path: dist
+
+      - name: Download Go artifacts (all)
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-go-*
+          merge-multiple: true
+          path: dist
+
+      - name: List dist
+        run: ls -lh dist
+
+      - name: Generate SHA256SUMS (deterministic)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          ls -1 | sort | xargs -I{} sha256sum "{}" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Generate SBOM (SPDX)
+        uses: anchore/sbom-action@v0
+        with:
+          path: dist
+          format: spdx-json
+          output-file: dist/SBOM.spdx.json
+
+      - name: Attest build provenance (release assets)
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "dist/*"
+
+      - name: Create GitHub Release + Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          files: dist/*
+          generate_release_notes: true

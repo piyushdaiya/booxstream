@@ -1,0 +1,14 @@
+# Gradle / Android build outputs
+**/build/
+.gradle/
+*.iml
+
+# Android Studio
+.idea/
+.local.properties
+
+# Kotlin/Java
+*.class
+
+# macOS
+.DS_Store

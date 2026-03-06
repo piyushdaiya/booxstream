@@ -1,0 +1,8 @@
+{
+  "version": "0.1.0",
+  "description": "BooxStream screen mirroring CLI",
+  "homepage": "https://github.com/piyushdaiya/booxstream",
+  "license": "Apache-2.0",
+  "url": "https://github.com/piyushdaiya/booxstream/releases/download/v0.1.0/booxcpy-windows-amd64.zip",
+  "bin": "booxcpy-windows-amd64.exe"
+}
