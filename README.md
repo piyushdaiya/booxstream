@@ -355,7 +355,7 @@ Contributions are welcome.
 
 Please read:
 
-[CONTRIBUTING.md](/CONTRIBUTING.MD)
+[CONTRIBUTING.md](/CONTRIBUTING.md)
 
 [CODE_OF_CONDUCT.md](/CODE_OF_CONDUCT.md)
 
@@ -371,7 +371,7 @@ See:
 
 [LICENSE](/LICENSE)
 
-[NOTICE](/NOTICE.md)
+[NOTICE](/NOTICE)
 
 
 ---
