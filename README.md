@@ -60,10 +60,7 @@ The host tool (**booxcpy**) receives the stream and can:
 
 # Demo
 
-<p align="center">
-<img src="docs/screenshots/mirroring.png" width="800">
-</p>
-
+Comming Soon!
 ---
 
 # Installation
