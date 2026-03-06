@@ -18,6 +18,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -49,7 +50,7 @@ type Config struct {
 	Serial   string
 	Install  bool
 	APKPath  string
-	NoPlay   bool // playback disabled (silent/no-mirror)
+	NoPlay   bool
 	Record   bool
 	Output   string
 	Width    int
@@ -61,7 +62,7 @@ type Config struct {
 }
 
 func main() {
-	cmdName, cfg := parseArgs(os.Args[1:]) // robust parsing (flags before/after command)
+	cmdName, cfg := parseArgs(os.Args[1:])
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -74,7 +75,6 @@ func main() {
 		adb.Serial = serial
 	}
 
-	// ---- Subcommands that don't need streaming ----
 	switch cmdName {
 	case "stop":
 		dieIf(stopRemote(ctx, adb, cfg))
@@ -83,12 +83,10 @@ func main() {
 		dieIf(statusRemote(ctx, adb, cfg))
 		return
 	case "mirror":
-		// continue
 	default:
 		dieIf(fmt.Errorf("unknown command %q (supported: mirror, stop, status)", cmdName))
 	}
 
-	// Ctrl+C handling + cleanup
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 
@@ -124,8 +122,12 @@ func main() {
 
 	dieIf(ensureInstalled(ctx, adb, cfg))
 
-	// Clean up old forward, then add forward.
+	_ = stopServiceQuiet(ctx, adb, cfg.Verbose)
+	time.Sleep(1000 * time.Millisecond)
+
 	_ = adb.ForwardRemove(ctx, adbForwardPort)
+	time.Sleep(300 * time.Millisecond)
+
 	dieIf(adb.Forward(ctx, adbForwardPort, adbForwardTarget))
 	defer cleanup("defer")
 
@@ -136,7 +138,6 @@ func main() {
 		fmt.Println("Skipping activity launch (--no-launch). Assuming app is already streaming.")
 	}
 
-	// Recording path logic
 	recordPath := ""
 	if cfg.Record {
 		recordPath = cfg.Output
@@ -151,15 +152,13 @@ func main() {
 		dieIf(errors.New("nothing to do: mirroring disabled (--silent/--no-mirror) and recording disabled (use --record)"))
 	}
 
-	// Wait for a valid IVF header before starting playback/recording.
 	addr := fmt.Sprintf("127.0.0.1:%d", adbForwardPort)
 	waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer waitCancel()
 
-	conn, first32, err := waitForIvfStream(waitCtx, addr)
+	conn, first32, err := waitForIvfStream(waitCtx, addr, cfg)
 	dieIf(err)
 
-	// record-only
 	if cfg.NoPlay {
 		dieIf(streamToRecordOnly(ctx, conn, first32, recordPath))
 		cleanup("record-only done")
@@ -167,19 +166,12 @@ func main() {
 		return
 	}
 
-	// play (and optionally record)
-	dieIf(streamToPlayerAndOptionalRecord(ctx, adb.Serial, conn, first32, recordPath))
+	dieIf(streamToPlayerAndOptionalRecord(ctx, adb.Serial, cfg, conn, first32, recordPath))
 	cleanup("mirror done")
 	fmt.Println("Done.")
 }
 
-// ------------------ Args parsing ------------------
-
 func parseArgs(argv []string) (string, Config) {
-	// Command detection:
-	// - default is "mirror"
-	// - allow command token anywhere (flags before/after)
-	// - strip the command token so flagset doesn't choke on it
 	cmd := "mirror"
 	filtered := make([]string, 0, len(argv))
 	for _, a := range argv {
@@ -190,13 +182,10 @@ func parseArgs(argv []string) (string, Config) {
 		switch strings.ToLower(a) {
 		case "mirror":
 			cmd = "mirror"
-			// drop token
 		case "stop":
 			cmd = "stop"
-			// drop token
 		case "status":
 			cmd = "status"
-			// drop token
 		default:
 			filtered = append(filtered, a)
 		}
@@ -226,16 +215,11 @@ func parseArgs(argv []string) (string, Config) {
 	fs.StringVar(&sizeStr, "size", "1280x720", "capture size WxH (sent to app)")
 	fs.IntVar(&fps, "fps", 12, "capture fps (sent to app)")
 	fs.IntVar(&bitrate, "bitrate", 0, "bitrate in bps (0=auto in app)")
-
-	// playback flags (mirror is ON by default)
 	fs.BoolVar(&noPlay, "no-play", false, "do not play stream (alias of --silent)")
 	fs.BoolVar(&silent, "silent", false, "do not play stream (record-only if --record)")
 	fs.BoolVar(&noMirror, "no-mirror", false, "do not play stream (record-only if --record)")
-
-	// recording
 	fs.BoolVar(&record, "record", false, "record stream to file")
 	fs.StringVar(&output, "output", "", "record output filename (default: booxstream_YYYYMMDD_HHMMSS.ivf)")
-
 	fs.BoolVar(&verbose, "v", false, "verbose logging")
 	fs.BoolVar(&noLaunch, "no-launch", false, "debug: don't start the app activity (assume already streaming)")
 
@@ -244,12 +228,9 @@ func parseArgs(argv []string) (string, Config) {
 	w, h, err := parseSize(sizeStr)
 	dieIf(err)
 
-	// If user provided --output, treat as --record (scrcpy-like ergonomics).
 	if output != "" {
 		record = true
 	}
-
-	// mirror on by default; only off if silent/no-mirror/no-play
 	noPlay = noPlay || silent || noMirror
 
 	cfg := Config{
@@ -286,7 +267,6 @@ func parseSize(s string) (int, int, error) {
 	}
 
 	var w, h int
-
 	if n, err := fmt.Sscanf(m[1], "%d", &w); err != nil || n != 1 {
 		return 0, 0, fmt.Errorf("invalid width in --size %q", s)
 	}
@@ -299,8 +279,6 @@ func parseSize(s string) (int, int, error) {
 	}
 	return w, h, nil
 }
-
-// ------------------ Device / install / launch ------------------
 
 func ensureDevice(ctx context.Context, adb *ADB) (string, error) {
 	devs, err := adb.Devices(ctx)
@@ -344,36 +322,63 @@ func ensureInstalled(ctx context.Context, adb *ADB, cfg Config) error {
 	return adb.Install(ctx, cfg.APKPath)
 }
 
-func startMirroringActivity(ctx context.Context, adb *ADB, cfg Config) error {
-	// Use -S to stop the app before starting (reliable fresh start)
+func sendHostConfig(ctx context.Context, adb *ADB, cfg Config) error {
 	args := []string{
-		"shell", "am", "start", "-S",
-		"-n", mainActivity,
-		"--ez", "booxstream_autostart", "true",
-		"--ei", "width", fmt.Sprintf("%d", cfg.Width),
-		"--ei", "height", fmt.Sprintf("%d", cfg.Height),
-		"--ei", "fps", fmt.Sprintf("%d", cfg.FPS),
-		"--ei", "bitrate", fmt.Sprintf("%d", cfg.Bitrate),
+		"shell", "am", "broadcast",
+		"-n", "io.github.piyushdaiya.booxstream/.HostCommandReceiver",
+		"-a", "io.github.piyushdaiya.booxstream.action.SET_CONFIG",
+		"--ez", "io.github.piyushdaiya.booxstream.extra.AUTOSTART", "true",
+		"--ei", "io.github.piyushdaiya.booxstream.extra.WIDTH", fmt.Sprintf("%d", cfg.Width),
+		"--ei", "io.github.piyushdaiya.booxstream.extra.HEIGHT", fmt.Sprintf("%d", cfg.Height),
+		"--ei", "io.github.piyushdaiya.booxstream.extra.FPS", fmt.Sprintf("%d", cfg.FPS),
+		"--ei", "io.github.piyushdaiya.booxstream.extra.BITRATE", fmt.Sprintf("%d", cfg.Bitrate),
 	}
 
 	out, err := adb.Run(ctx, args...)
-	if err != nil {
-		return err
-	}
-	if strings.Contains(out, "Error") || strings.Contains(out, "Exception") {
+	if adb.Verbose && strings.TrimSpace(out) != "" {
+		fmt.Fprintln(os.Stderr, "[am broadcast output]")
 		fmt.Fprintln(os.Stderr, out)
 	}
+	if err != nil {
+		return fmt.Errorf("failed to send host config: %w", err)
+	}
+
+	lower := strings.ToLower(out)
+	if strings.Contains(lower, "exception") || strings.Contains(lower, "error") {
+		return fmt.Errorf("host config broadcast failed: %s", strings.TrimSpace(out))
+	}
+	return nil
+}
+
+func startMirroringActivity(ctx context.Context, adb *ADB, cfg Config) error {
+	out, err := adb.Run(ctx, "shell", "am", "start", "-W", "-n", mainActivity)
+	if adb.Verbose && strings.TrimSpace(out) != "" {
+		fmt.Fprintln(os.Stderr, "[am start output]")
+		fmt.Fprintln(os.Stderr, out)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to launch BooxStream activity: %w", err)
+	}
+
+	lower := strings.ToLower(out)
+	if strings.Contains(lower, "error type") ||
+		strings.Contains(lower, "exception") ||
+		strings.Contains(lower, "unable to resolve intent") ||
+		(strings.Contains(lower, "activity class") && strings.Contains(lower, "does not exist")) {
+		return fmt.Errorf("activity launch failed: %s", strings.TrimSpace(out))
+	}
+
+	if err := sendHostConfig(ctx, adb, cfg); err != nil {
+		return err
+	}
+
 	fmt.Println("Launched BooxStream on device. If prompted, tap “Start now”.")
 	return nil
 }
 
-// ------------------ Commands: stop/status ------------------
-
 func stopRemote(ctx context.Context, adb *ADB, cfg Config) error {
 	_ = adb.ForwardRemove(ctx, adbForwardPort)
-	if err := stopServiceQuiet(ctx, adb, cfg.Verbose); err != nil {
-		return err
-	}
+	_ = stopServiceQuiet(ctx, adb, cfg.Verbose)
 	fmt.Println("Stopped (if it was running).")
 	return nil
 }
@@ -408,7 +413,6 @@ func stopServiceQuiet(ctx context.Context, adb *ADB, verbose bool) error {
 		return nil
 	}
 
-	// Suppress idempotent stop noise unless verbose
 	if !verbose {
 		if strings.Contains(trim, "was not running") ||
 			strings.Contains(trim, "Service not stopped") ||
@@ -418,14 +422,26 @@ func stopServiceQuiet(ctx context.Context, adb *ADB, verbose bool) error {
 		return nil
 	}
 
-	// Verbose: print what Android said
 	fmt.Fprintln(os.Stderr, trim)
 	return nil
 }
 
-// ------------------ Streaming (race-free) ------------------
+func parseIvfHeader(hdr []byte) (w int, h int, fps int, ok bool) {
+	if len(hdr) < 32 || !bytes.Equal(hdr[0:4], []byte("DKIF")) {
+		return 0, 0, 0, false
+	}
+	w = int(binary.LittleEndian.Uint16(hdr[12:14]))
+	h = int(binary.LittleEndian.Uint16(hdr[14:16]))
+	timebaseDen := int(binary.LittleEndian.Uint32(hdr[16:20]))
+	timebaseNum := int(binary.LittleEndian.Uint32(hdr[20:24]))
+	if timebaseNum <= 0 || timebaseDen <= 0 {
+		return w, h, 0, true
+	}
+	fps = timebaseDen / timebaseNum
+	return w, h, fps, true
+}
 
-func waitForIvfStream(ctx context.Context, addr string) (net.Conn, []byte, error) {
+func waitForIvfStream(ctx context.Context, addr string, cfg Config) (net.Conn, []byte, error) {
 	dialer := net.Dialer{Timeout: 500 * time.Millisecond}
 
 	for {
@@ -451,7 +467,21 @@ func waitForIvfStream(ctx context.Context, addr string) (net.Conn, []byte, error
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-		if !bytes.Equal(hdr[0:4], []byte("DKIF")) {
+
+		w, h, fps, ok := parseIvfHeader(hdr)
+		if !ok {
+			_ = c.Close()
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		if w != cfg.Width || h != cfg.Height {
+			_ = c.Close()
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		if fps > 0 && fps != cfg.FPS {
 			_ = c.Close()
 			time.Sleep(200 * time.Millisecond)
 			continue
@@ -521,10 +551,17 @@ func streamToRecordOnly(ctx context.Context, conn net.Conn, first32 []byte, reco
 	return err
 }
 
-func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, conn net.Conn, first32 []byte, recordPath string) error {
+func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, cfg Config, conn net.Conn, first32 []byte, recordPath string) error {
 	defer conn.Close()
 
-	title := fmt.Sprintf("BooxStream (%s)", serial)
+	title := fmt.Sprintf(
+		"BooxStream Mirror - %s - %dx%d@%dfps",
+		serial,
+		cfg.Width,
+		cfg.Height,
+		cfg.FPS,
+	)
+
 	cmd, ffIn, err := runFFplayFromStdin(ctx, title, nil)
 	if err != nil {
 		return err
@@ -580,7 +617,6 @@ func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, conn ne
 		return ctx.Err()
 	}
 
-	// If ffplay exits early, we may see broken pipe; treat as normal stop.
 	if copyErr != nil {
 		if strings.Contains(strings.ToLower(copyErr.Error()), "broken pipe") {
 			return nil
@@ -588,8 +624,6 @@ func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, conn ne
 	}
 	return copyErr
 }
-
-// ------------------ misc ------------------
 
 func dieIf(err error) {
 	if err == nil {
@@ -601,8 +635,6 @@ func dieIf(err error) {
 	}
 	os.Exit(1)
 }
-
-// ------------------ ADB helper ------------------
 
 type ADB struct {
 	Serial  string
