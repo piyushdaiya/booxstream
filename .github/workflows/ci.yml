@@ -78,14 +78,14 @@ jobs:
           ls -lh "${GITHUB_WORKSPACE}/dist/android/${{ runner.os }}"
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: app-debug-${{ runner.os }}
           path: dist/android/${{ runner.os }}/*.apk
           if-no-files-found: error
 
       - name: Upload Lint report (optional)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-lint-${{ runner.os }}
           path: |
@@ -94,7 +94,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Unit Test reports (optional)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-test-reports-${{ runner.os }}
           path: android/**/build/reports/tests/**
@@ -174,7 +174,7 @@ jobs:
           Get-ChildItem $outDir
 
       - name: Upload booxcpy package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: booxcpy-pkg-${{ runner.os }}-${{ matrix.goarch }}
           path: dist/go/${{ runner.os }}-${{ matrix.goarch }}/*

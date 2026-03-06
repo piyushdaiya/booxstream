@@ -155,7 +155,7 @@ jobs:
           ls -lh "${GITHUB_WORKSPACE}/dist"
 
       - name: Upload Android artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-android
           path: ${{ github.workspace }}/dist/*.apk
@@ -248,7 +248,7 @@ jobs:
           Get-ChildItem $out
 
       - name: Upload Go artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-go-${{ runner.os }}-${{ matrix.goarch }}
           path: ${{ github.workspace }}/dist/*
