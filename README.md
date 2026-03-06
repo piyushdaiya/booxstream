@@ -8,7 +8,7 @@
 
 [![CI](https://github.com/piyushdaiya/booxstream/actions/workflows/ci.yml/badge.svg)](https://github.com/piyushdaiya/booxstream/actions/workflows/ci.yml)
 ![Release](https://github.com/piyushdaiya/booxstream/actions/workflows/release.yml/badge.svg)
-[![License](https://img.shields.io/github/license/piyushdaiya/booxstream)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![GitHub Release](https://img.shields.io/github/v/release/piyushdaiya/booxstream)](https://github.com/piyushdaiya/booxstream/releases)
 ![Downloads](https://img.shields.io/github/downloads/piyushdaiya/booxstream/total)
 
@@ -245,16 +245,11 @@ docs/ARCHITECTURE.md
 # Screenshots
 
 ### Mirroring
-
-<p align="center">
-<img src="docs/screenshots/mirroring.png" width="800">
-</p>
+Coming soon!
 
 ### Android UI
+Coming soon!
 
-<p align="center">
-<img src="docs/screenshots/android-ui.png" width="400">
-</p>
 
 ---
 
@@ -348,9 +343,9 @@ No external network services are exposed.
 
 See:
 
-```
-SECURITY.md
-```
+
+[SECURITY.md](/SECURITY.md)
+
 
 ---
 
@@ -360,10 +355,10 @@ Contributions are welcome.
 
 Please read:
 
-```
-CONTRIBUTING.md
-CODE_OF_CONDUCT.md
-```
+[CONTRIBUTING.md](/CONTRIBUTING.MD)
+
+[CODE_OF_CONDUCT.md](/CODE_OF_CONDUCT.md)
+
 
 ---
 
@@ -373,10 +368,11 @@ Licensed under the **Apache License 2.0**.
 
 See:
 
-```
-LICENSE
-NOTICE
-```
+
+[LICENSE](/LICENSE)
+
+[NOTICE](/NOTICE.md)
+
 
 ---
 
@@ -396,9 +392,9 @@ https://github.com/piyushdaiya
 
 BooxStream is inspired by:
 
-```
-scrcpy
-```
+
+[scrcpy](https://github.com/Genymobile/scrcpy)
+
 
 by Genymobile.
 
@@ -408,5 +404,7 @@ BOOX is a trademark of Onyx International Inc.
 
 BooxStream is an independent open-source project and is not affiliated with,
 endorsed by, or sponsored by Onyx International Inc.
+
+---
 
 The project adapts the same philosophy specifically for **e-ink devices**.
