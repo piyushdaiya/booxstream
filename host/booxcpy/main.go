@@ -34,6 +34,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"sync/atomic"
 )
 
 const (
@@ -59,6 +60,7 @@ type Config struct {
 	Bitrate  int
 	Verbose  bool
 	NoLaunch bool
+	Preset   string
 }
 
 func main() {
@@ -156,17 +158,17 @@ func main() {
 	waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer waitCancel()
 
-	conn, first32, err := waitForIvfStream(waitCtx, addr, cfg)
+	conn, prefix, err := waitForIvfStream(waitCtx, addr, cfg)
 	dieIf(err)
 
 	if cfg.NoPlay {
-		dieIf(streamToRecordOnly(ctx, conn, first32, recordPath))
+		dieIf(streamToRecordOnly(ctx, conn, prefix, recordPath))
 		cleanup("record-only done")
 		fmt.Println("Done.")
 		return
 	}
 
-	dieIf(streamToPlayerAndOptionalRecord(ctx, adb.Serial, cfg, conn, first32, recordPath))
+	dieIf(streamToPlayerAndOptionalRecord(ctx, adb.Serial, cfg, conn, prefix, recordPath))
 	cleanup("mirror done")
 	fmt.Println("Done.")
 }
@@ -207,6 +209,7 @@ func parseArgs(argv []string) (string, Config) {
 		bitrate  int
 		verbose  bool
 		noLaunch bool
+		preset   string
 	)
 
 	fs.StringVar(&serial, "serial", "", "adb device serial (if multiple devices connected)")
@@ -222,10 +225,14 @@ func parseArgs(argv []string) (string, Config) {
 	fs.StringVar(&output, "output", "", "record output filename (default: booxstream_YYYYMMDD_HHMMSS.ivf)")
 	fs.BoolVar(&verbose, "v", false, "verbose logging")
 	fs.BoolVar(&noLaunch, "no-launch", false, "debug: don't start the app activity (assume already streaming)")
+	fs.StringVar(&preset, "preset", "", "device preset: leaf3c, noteair, custom")
 
 	_ = fs.Parse(filtered)
 
 	w, h, err := parseSize(sizeStr)
+	dieIf(err)
+
+	w, h, fps, bitrate, err = applyPreset(preset, w, h, fps, bitrate)
 	dieIf(err)
 
 	if output != "" {
@@ -246,8 +253,92 @@ func parseArgs(argv []string) (string, Config) {
 		Bitrate:  bitrate,
 		Verbose:  verbose,
 		NoLaunch: noLaunch,
+		Preset:   preset,
 	}
 	return cmd, cfg
+}
+
+type statsWriter struct {
+	w          io.Writer
+	bytesTotal atomic.Int64
+	framesTotal atomic.Int64
+}
+
+func (s *statsWriter) Write(p []byte) (int, error) {
+	n, err := s.w.Write(p)
+	if n > 0 {
+		s.bytesTotal.Add(int64(n))
+	}
+	return n, err
+}
+
+func (s *statsWriter) addFrame() {
+	s.framesTotal.Add(1)
+}
+
+func (s *statsWriter) snapshot() (bytes int64, frames int64) {
+	return s.bytesTotal.Load(), s.framesTotal.Load()
+}
+
+func startLiveCLIStats(ctx context.Context, sw *statsWriter, label string) func() {
+	start := time.Now()
+	done := make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+
+		var lastBytes int64
+		var lastFrames int64
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-done:
+				return
+			case <-ticker.C:
+				totalBytes, totalFrames := sw.snapshot()
+
+				deltaBytes := totalBytes - lastBytes
+				deltaFrames := totalFrames - lastFrames
+				lastBytes = totalBytes
+				lastFrames = totalFrames
+
+				kbps := float64(deltaBytes*8) / 1000.0
+				elapsed := time.Since(start).Round(time.Second)
+				totalMB := float64(totalBytes) / (1024.0 * 1024.0)
+
+				fmt.Fprintf(
+					os.Stderr,
+					"[stats] %s elapsed=%s fps=%.2f kbps=%.0f frames=%d total=%.2fMB\n",
+					label,
+					elapsed,
+					float64(deltaFrames),
+					kbps,
+					totalFrames,
+					totalMB,
+				)
+			}
+		}
+	}()
+
+	return func() {
+		close(done)
+	}
+}
+
+func applyPreset(preset string, w, h, fps, bitrate int) (int, int, int, int, error) {
+	switch strings.ToLower(strings.TrimSpace(preset)) {
+	case "", "custom":
+		return w, h, fps, bitrate, nil
+	case "leaf3c":
+		return 960, 540, 8, 900000, nil
+	case "noteair":
+		return 1024, 600, 6, 1200000, nil
+	default:
+		return 0, 0, 0, 0, fmt.Errorf("unknown preset %q (supported: leaf3c, noteair, custom)", preset)
+	}
 }
 
 func defaultAPKPath() string {
@@ -441,6 +532,16 @@ func parseIvfHeader(hdr []byte) (w int, h int, fps int, ok bool) {
 	return w, h, fps, true
 }
 
+func isVP8Keyframe(frame []byte) bool {
+	if len(frame) < 10 {
+		return false
+	}
+	if (frame[0] & 0x01) != 0 {
+		return false
+	}
+	return frame[3] == 0x9d && frame[4] == 0x01 && frame[5] == 0x2a
+}
+
 func waitForIvfStream(ctx context.Context, addr string, cfg Config) (net.Conn, []byte, error) {
 	dialer := net.Dialer{Timeout: 500 * time.Millisecond}
 
@@ -457,37 +558,70 @@ func waitForIvfStream(ctx context.Context, addr string, cfg Config) (net.Conn, [
 			continue
 		}
 
-		_ = c.SetReadDeadline(time.Now().Add(800 * time.Millisecond))
-		hdr := make([]byte, 32)
-		_, err = io.ReadFull(c, hdr)
-		_ = c.SetReadDeadline(time.Time{})
+		_ = c.SetReadDeadline(time.Now().Add(1500 * time.Millisecond))
 
-		if err != nil {
+		streamHdr := make([]byte, 32)
+		if _, err := io.ReadFull(c, streamHdr); err != nil {
 			_ = c.Close()
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		w, h, fps, ok := parseIvfHeader(hdr)
+		w, h, fps, ok := parseIvfHeader(streamHdr)
 		if !ok {
 			_ = c.Close()
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-
 		if w != cfg.Width || h != cfg.Height {
 			_ = c.Close()
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
-
 		if fps > 0 && fps != cfg.FPS {
 			_ = c.Close()
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		return c, hdr, nil
+		var prefix bytes.Buffer
+		prefix.Write(streamHdr)
+
+		foundKeyframe := false
+		for i := 0; i < 60; i++ {
+			frameHdr := make([]byte, 12)
+			if _, err := io.ReadFull(c, frameHdr); err != nil {
+				break
+			}
+
+			frameSize := binary.LittleEndian.Uint32(frameHdr[0:4])
+			if frameSize == 0 || frameSize > 16*1024*1024 {
+				break
+			}
+
+			frame := make([]byte, frameSize)
+			if _, err := io.ReadFull(c, frame); err != nil {
+				break
+			}
+
+			if isVP8Keyframe(frame) {
+				prefix.Write(frameHdr)
+				prefix.Write(frame)
+				foundKeyframe = true
+				break
+			}
+		}
+
+		_ = c.SetReadDeadline(time.Time{})
+
+		if !foundKeyframe {
+			_ = c.Close()
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
+		fmt.Fprintf(os.Stderr, "Connected to stream: %dx%d @ %dfps (decoder-safe start)\n", w, h, fps)
+		return c, prefix.Bytes(), nil
 	}
 }
 
@@ -517,7 +651,7 @@ func runFFplayFromStdin(ctx context.Context, title string, extraArgs []string) (
 	return cmd, in, nil
 }
 
-func streamToRecordOnly(ctx context.Context, conn net.Conn, first32 []byte, recordPath string) error {
+func streamToRecordOnly(ctx context.Context, conn net.Conn, prefix []byte, recordPath string) error {
 	defer conn.Close()
 
 	f, err := os.Create(recordPath)
@@ -529,9 +663,13 @@ func streamToRecordOnly(ctx context.Context, conn net.Conn, first32 []byte, reco
 	bw := bufio.NewWriterSize(f, 256*1024)
 	defer bw.Flush()
 
-	if _, err := bw.Write(first32); err != nil {
+	if _, err := bw.Write(prefix); err != nil {
 		return err
 	}
+
+	sw := &statsWriter{w: bw}
+	stopStats := startLiveCLIStats(ctx, sw, "record")
+	defer stopStats()
 
 	done := make(chan struct{})
 	go func() {
@@ -542,20 +680,51 @@ func streamToRecordOnly(ctx context.Context, conn net.Conn, first32 []byte, reco
 		}
 	}()
 
-	_, err = io.CopyBuffer(bw, conn, make([]byte, 256*1024))
-	close(done)
+	frameBufHdr := make([]byte, 12)
+	for {
+		if _, err := io.ReadFull(conn, frameBufHdr); err != nil {
+			close(done)
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return ctx.Err()
+			}
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
 
-	if errors.Is(ctx.Err(), context.Canceled) {
-		return ctx.Err()
+		frameSize := binary.LittleEndian.Uint32(frameBufHdr[0:4])
+		if frameSize == 0 || frameSize > 16*1024*1024 {
+			close(done)
+			return fmt.Errorf("invalid IVF frame size: %d", frameSize)
+		}
+
+		frame := make([]byte, frameSize)
+		if _, err := io.ReadFull(conn, frame); err != nil {
+			close(done)
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return ctx.Err()
+			}
+			return err
+		}
+
+		if _, err := sw.Write(frameBufHdr); err != nil {
+			close(done)
+			return err
+		}
+		if _, err := sw.Write(frame); err != nil {
+			close(done)
+			return err
+		}
+		sw.addFrame()
 	}
-	return err
 }
 
-func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, cfg Config, conn net.Conn, first32 []byte, recordPath string) error {
+func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, cfg Config, conn net.Conn, prefix []byte, recordPath string) error {
 	defer conn.Close()
 
 	title := fmt.Sprintf(
-		"BooxStream Mirror - %s - %dx%d@%dfps",
+		"BooxStream LIVE [%s] %dx%d %dfps",
 		serial,
 		cfg.Width,
 		cfg.Height,
@@ -585,9 +754,19 @@ func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, cfg Con
 		outW = io.MultiWriter(ffIn, bw)
 	}
 
-	if _, err := outW.Write(first32); err != nil {
+	if _, err := outW.Write(prefix); err != nil {
 		return err
 	}
+
+	sw := &statsWriter{}
+	sw.w = outW
+
+	// Count the prefetched first keyframe packet as one frame.
+	sw.bytesTotal.Add(int64(len(prefix)))
+	sw.addFrame()
+
+	stopStats := startLiveCLIStats(ctx, sw, "mirror")
+	defer stopStats()
 
 	done := make(chan struct{})
 	go func() {
@@ -599,7 +778,42 @@ func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, cfg Con
 		}
 	}()
 
-	_, copyErr := io.CopyBuffer(outW, conn, make([]byte, 256*1024))
+	frameBufHdr := make([]byte, 12)
+	var copyErr error
+
+	for {
+		if _, err := io.ReadFull(conn, frameBufHdr); err != nil {
+			if err == io.EOF {
+				copyErr = nil
+			} else {
+				copyErr = err
+			}
+			break
+		}
+
+		frameSize := binary.LittleEndian.Uint32(frameBufHdr[0:4])
+		if frameSize == 0 || frameSize > 16*1024*1024 {
+			copyErr = fmt.Errorf("invalid IVF frame size: %d", frameSize)
+			break
+		}
+
+		frame := make([]byte, frameSize)
+		if _, err := io.ReadFull(conn, frame); err != nil {
+			copyErr = err
+			break
+		}
+
+		if _, err := sw.Write(frameBufHdr); err != nil {
+			copyErr = err
+			break
+		}
+		if _, err := sw.Write(frame); err != nil {
+			copyErr = err
+			break
+		}
+		sw.addFrame()
+	}
+
 	close(done)
 
 	_ = ffIn.Close()
@@ -618,11 +832,16 @@ func streamToPlayerAndOptionalRecord(ctx context.Context, serial string, cfg Con
 	}
 
 	if copyErr != nil {
+		if copyErr == io.EOF {
+			return fmt.Errorf("stream ended unexpectedly")
+		}
 		if strings.Contains(strings.ToLower(copyErr.Error()), "broken pipe") {
 			return nil
 		}
+		return copyErr
 	}
-	return copyErr
+
+	return nil
 }
 
 func dieIf(err error) {

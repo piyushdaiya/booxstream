@@ -414,7 +414,10 @@ class MainActivity : ComponentActivity() {
                                         Vp8StatsStore.updateLastHostEventReason(null)
                                         Vp8StatsStore.update(null)
                                         Vp8StatsStore.updateStopReason("user_stop")
-                                        stopService(Intent(this@MainActivity, Vp8IvfStreamService::class.java))
+                                        val stopIntent = Intent(this@MainActivity, Vp8IvfStreamService::class.java).apply {
+                                         action = Vp8IvfStreamService.ACTION_STOP
+                                         }
+                                        startService(stopIntent)
                                     }
                                 ) {
                                     Text("Stop")

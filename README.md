@@ -81,6 +81,27 @@ As a result, using generic mirroring tools can lead to:
 
 BooxStream focuses specifically on **low-refresh-rate mirroring** for e-ink devices.
 
+## Boox device optimization
+
+Some Boox devices aggressively stop background services, which can interrupt streaming unexpectedly.
+
+If mirroring freezes or stops after a short time, enable:
+
+- **Apps**
+- **BooxStream**
+- Right click **BooxStream** and select **Optimize**
+- Select **Others** tab and **Stay active in the background** → **On**
+- 
+
+Without this setting, BooxStream may be stopped by the device as an idle/background app.
+
+If BooxStream app is not opening after running booxcpy on your machine, then check if your Boox device has frozen **BooxStream** app or not.
+
+- **Apps**
+- **BooxStream**
+- Right click **BooxStream** and select **Unfreeze**
+
+
 ---
 
 # Why Not Just Use scrcpy?

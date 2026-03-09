@@ -69,6 +69,8 @@ class Vp8IvfStreamService : Service() {
 
         const val ABSTRACT_NAME = "booxstream_ivf"
 
+        const val ACTION_STOP = "io.github.piyushdaiya.booxstream.action.STOP"
+
         private const val FLUSH_EVERY_N_FRAMES = 12
         private const val REQUEST_SYNC_EVERY_MS = 1500L
         private const val STOP_IF_NO_CLIENT_MS = 120000L
@@ -89,9 +91,11 @@ class Vp8IvfStreamService : Service() {
         const val EXTRA_STATE_REASON = "reason"
         const val REASON_CLIENT_CONNECTED = "client_connected"
         const val REASON_CLIENT_DISCONNECTED = "client_disconnected"
+        const val REASON_USER_STOP = "user_stop"
     }
 
     private val running = AtomicBoolean(false)
+    private val teardownStarted = AtomicBoolean(false)
 
     private var projection: MediaProjection? = null
     private var vd: VirtualDisplay? = null
@@ -147,6 +151,13 @@ class Vp8IvfStreamService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            broadcastState(false, REASON_USER_STOP)
+            stopEverything()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         if (intent == null) return START_NOT_STICKY
         if (running.getAndSet(true)) return START_STICKY
 
@@ -156,12 +167,8 @@ class Vp8IvfStreamService : Service() {
         startForeground(NOTIF_ID, buildNotification("Streaming starting…"))
 
         val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
-        val resultData = if (Build.VERSION.SDK_INT >= 33) {
-            intent.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
-        } else {
             @Suppress("DEPRECATION")
-            intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
-        }
+        val resultData = intent.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
 
         val width = intent.getIntExtra(EXTRA_WIDTH, 1280).coerceIn(320, 2600)
         val height = intent.getIntExtra(EXTRA_HEIGHT, 720).coerceIn(320, 2600)
@@ -193,7 +200,10 @@ class Vp8IvfStreamService : Service() {
                 startEncoder(width, height, fps, bitrate)
 
                 server = LocalServerSocket(ABSTRACT_NAME)
-                Log.i(TAG, "LISTENING on localabstract:$ABSTRACT_NAME (use adb forward tcp:27183 localabstract:$ABSTRACT_NAME)")
+                Log.i(
+                    TAG,
+                    "LISTENING on localabstract:$ABSTRACT_NAME (use adb forward tcp:27183 localabstract:$ABSTRACT_NAME)"
+                )
                 updateNotification("Listening on localabstract:$ABSTRACT_NAME")
 
                 noClientDeadlineMs = SystemClock.elapsedRealtime() + STOP_IF_NO_CLIENT_MS
@@ -255,6 +265,8 @@ class Vp8IvfStreamService : Service() {
     }
 
     private fun resetPerRun() {
+        teardownStarted.set(false)
+
         intervalFrames.set(0)
         intervalBytes.set(0)
         totalFrames.set(0)
@@ -264,7 +276,6 @@ class Vp8IvfStreamService : Service() {
         writeErrors.set(0)
         lastKeyframeAtMs.set(0)
         lastFrameBytes.set(0)
-        lastFrameWriteAtMs.set(0)
         statsLastTickMs = SystemClock.elapsedRealtime()
 
         keyframeTickerRunning = false
@@ -291,16 +302,6 @@ class Vp8IvfStreamService : Service() {
                 if (!running.get() || !idleStopTickerRunning) return
 
                 val hasClient = synchronized(sinkLock) { sink != null }
-                val lastWriteAgo = run {
-                    val last = lastFrameWriteAtMs.get()
-                    if (last == 0L) -1L else (SystemClock.elapsedRealtime() - last)
-                }
-
-                Log.d(
-                    TAG,
-                    "idleTick hasClient=$hasClient noClientDeadlineMs=$noClientDeadlineMs lastWriteAgoMs=$lastWriteAgo totalFrames=${totalFrames.get()}"
-                )
-
                 if (!hasClient) {
                     val now = SystemClock.elapsedRealtime()
                     if (now >= noClientDeadlineMs) {
@@ -314,7 +315,7 @@ class Vp8IvfStreamService : Service() {
                     noClientDeadlineMs = Long.MAX_VALUE
                 }
 
-                h.postDelayed(this, 1000L)
+                h.postDelayed(this, 250L)
             }
         })
     }
@@ -342,7 +343,11 @@ class Vp8IvfStreamService : Service() {
             override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
             }
 
-            override fun onOutputBufferAvailable(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
+            override fun onOutputBufferAvailable(
+                codec: MediaCodec,
+                index: Int,
+                info: MediaCodec.BufferInfo
+            ) {
                 try {
                     if (!running.get()) return
                     if ((info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) return
@@ -356,6 +361,7 @@ class Vp8IvfStreamService : Service() {
                     buf.get(frame)
 
                     val isKeyframe = isVp8KeyframeForSize(frame, width, height)
+
                     val localSink: ClientSink = synchronized(sinkLock) { sink } ?: return
 
                     if (!localSink.sawKeyframe) {
@@ -373,27 +379,19 @@ class Vp8IvfStreamService : Service() {
                     }
 
                     localSink.ivf.writeFrame(frame)
+
                     lastFrameBytes.set(frame.size)
-
-                    val framesNow = totalFrames.incrementAndGet()
-                    val bytesNow = totalBytes.addAndGet(frame.size.toLong())
-
+                    totalFrames.incrementAndGet()
+                    totalBytes.addAndGet(frame.size.toLong())
                     intervalFrames.incrementAndGet()
                     intervalBytes.addAndGet(frame.size.toLong())
-                    lastFrameWriteAtMs.set(SystemClock.elapsedRealtime())
-
-                    if (framesNow % streamAliveLogEveryFrames == 0L) {
-                        Log.i(
-                            TAG,
-                            "stream alive frames=$framesNow bytes=$bytesNow lastFrame=${frame.size}B sawKeyframe=${localSink.sawKeyframe}"
-                        )
-                    }
 
                     localSink.framesSinceFlush++
                     if (localSink.framesSinceFlush >= FLUSH_EVERY_N_FRAMES || isKeyframe) {
                         localSink.out.flush()
                         localSink.framesSinceFlush = 0
                     }
+
                 } catch (t: Throwable) {
                     writeErrors.incrementAndGet()
                     Log.e(TAG, "Write failed; detaching client", t)
@@ -449,7 +447,10 @@ class Vp8IvfStreamService : Service() {
             sink = null
         }
 
-        Log.i(TAG, "detachClient() hadClient=$hadClient notifyHostState=$notifyHostState")
+        Log.i(
+            TAG,
+            "detachClient() hadClient=$hadClient notifyHostState=$notifyHostState totalFrames=${totalFrames.get()} totalBytes=${totalBytes.get()}"
+        )
 
         if (hadClient) {
             noClientDeadlineMs = SystemClock.elapsedRealtime() + STOP_IF_NO_CLIENT_MS
@@ -544,6 +545,17 @@ class Vp8IvfStreamService : Service() {
                     val last = lastKeyframeAtMs.get()
                     if (last == 0L) Long.MAX_VALUE else (now - last)
                 }
+                Log.i(
+                    TAG,
+                    "stats fpsOut=${"%.2f".format(fpsOut)} " +
+                        "kbpsOut=${"%.0f".format(kbpsOut)} " +
+                        "totalFrames=${totalFrames.get()} " +
+                        "totalBytes=${totalBytes.get()} " +
+                        "sinceKfMs=$sinceKf " +
+                        "lastFrameBytes=${lastFrameBytes.get()} " +
+                        "droppedPreKf=${droppedBeforeKeyframe.get()} " +
+                        "writeErrors=${writeErrors.get()}"
+                )
 
                 sendBroadcast(
                     Intent(ACTION_VP8_STATS).apply {
@@ -578,15 +590,6 @@ class Vp8IvfStreamService : Service() {
 
     private fun updateNotification(text: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        if (Build.VERSION.SDK_INT >= 33) {
-            val granted = ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-            if (!granted) return
-        }
-
         nm.notify(NOTIF_ID, buildNotification(text))
     }
 
@@ -612,12 +615,18 @@ class Vp8IvfStreamService : Service() {
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            val ch = NotificationChannel(CHANNEL_ID, "BooxStream", NotificationManager.IMPORTANCE_LOW)
+            val ch = NotificationChannel(
+                CHANNEL_ID,
+                "BooxStream",
+                NotificationManager.IMPORTANCE_LOW
+            )
             nm.createNotificationChannel(ch)
         }
     }
 
     private fun stopEverything() {
+        if (!teardownStarted.compareAndSet(false, true)) return
+
         running.set(false)
         stopKeyframeTicker()
         stopStatsTicker()
@@ -659,6 +668,22 @@ class Vp8IvfStreamService : Service() {
         }
         codecThread = null
         codecHandler = null
+
+        try {
+            if (Build.VERSION.SDK_INT >= 24) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Throwable) {
+        }
+
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            nm.cancel(NOTIF_ID)
+        } catch (_: Throwable) {
+        }
     }
 
     override fun onDestroy() {
