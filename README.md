@@ -91,7 +91,6 @@ If mirroring freezes or stops after a short time, enable:
 - **BooxStream**
 - Right click **BooxStream** and select **Optimize**
 - Select **Others** tab and **Stay active in the background** → **On**
-- 
 
 Without this setting, BooxStream may be stopped by the device as an idle/background app.
 

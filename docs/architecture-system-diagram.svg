@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980">
+<defs><filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#000000" flood-opacity="0.12"/></filter><marker id="arrow" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto"><path d="M0,0 L12,6 L0,12 z" fill="#2563eb"/></marker></defs>
+<rect width="100%" height="100%" fill="#f8fafc"/>
+<text x="60" y="70" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="36" font-weight="800" fill="#0f172a">BooxStream System Architecture</text>
+<text x="60" y="105" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" fill="#475569">E-ink-oriented Android capture, VP8 encoding, IVF transport, ADB forwarding, and a lightweight Go host client.</text>
+<g filter="url(#shadow)">
+<rect x="60" y="150" rx="28" ry="28" width="620" height="700" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+<rect x="920" y="150" rx="28" ry="28" width="620" height="700" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
+</g>
+<text x="90" y="190" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28" font-weight="800" fill="#312e81">Boox Device</text>
+<text x="950" y="190" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="28" font-weight="800" fill="#155e75">Host Computer</text>
+<g filter="url(#shadow)"><rect x="110" y="230" rx="18" ry="18" width="520" height="88" fill="#ffffff" stroke="#818cf8" stroke-width="2"/>
+<text x="130" y="264" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#111827">MainActivity + HostCommandReceiver</text>
+<text x="130" y="292" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Receives host config</text>
+<text x="130" y="316" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Requests capture permission</text>
+<text x="130" y="340" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Starts and stops streaming service</text></g>
+<g filter="url(#shadow)"><rect x="110" y="350" rx="18" ry="18" width="520" height="88" fill="#ffffff" stroke="#818cf8" stroke-width="2"/>
+<text x="130" y="384" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#111827">MediaProjection + VirtualDisplay</text>
+<text x="130" y="412" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Captures e-ink display output</text>
+<text x="130" y="436" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Feeds frames into encoder surface</text></g>
+<g filter="url(#shadow)"><rect x="110" y="470" rx="18" ry="18" width="520" height="88" fill="#ffffff" stroke="#818cf8" stroke-width="2"/>
+<text x="130" y="504" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#111827">MediaCodec VP8 Encoder</text>
+<text x="130" y="532" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Encodes screen frames as VP8</text>
+<text x="130" y="556" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Tuned for low-refresh e-ink workloads</text></g>
+<g filter="url(#shadow)"><rect x="110" y="590" rx="18" ry="18" width="520" height="88" fill="#ffffff" stroke="#818cf8" stroke-width="2"/>
+<text x="130" y="624" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#111827">IVF Stream over localabstract socket</text>
+<text x="130" y="652" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Writes IVF-containerized VP8 frames</text>
+<text x="130" y="676" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Socket: localabstract:booxstream_ivf</text></g>
+<line x1="370" y1="318" x2="370" y2="342" stroke="#4f46e5" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="370" y1="438" x2="370" y2="462" stroke="#4f46e5" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="370" y1="558" x2="370" y2="582" stroke="#4f46e5" stroke-width="4" marker-end="url(#arrow)"/>
+<g filter="url(#shadow)"><rect x="970" y="270" rx="18" ry="18" width="500" height="96" fill="#ffffff" stroke="#0891b2" stroke-width="2"/>
+<text x="990" y="304" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#111827">ADB forward tcp:27183 → localabstract:booxstream_ivf</text>
+<text x="990" y="332" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Bridges Android local socket to localhost</text>
+<text x="990" y="356" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">No external network service required</text></g>
+<g filter="url(#shadow)"><rect x="970" y="420" rx="18" ry="18" width="500" height="96" fill="#ffffff" stroke="#0891b2" stroke-width="2"/>
+<text x="990" y="454" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#111827">booxcpy (Go CLI)</text>
+<text x="990" y="482" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Launches app and sends config</text>
+<text x="990" y="506" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Waits for decoder-safe stream start</text>
+<text x="990" y="530" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Shows live CLI stats</text></g>
+<g filter="url(#shadow)"><rect x="970" y="590" rx="18" ry="18" width="500" height="96" fill="#ffffff" stroke="#0891b2" stroke-width="2"/>
+<text x="990" y="624" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#111827">ffplay / optional IVF recording</text>
+<text x="990" y="652" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Displays the mirror in a desktop window</text>
+<text x="990" y="676" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#374151">Optionally records .ivf output for demos</text></g>
+<line x1="1220" y1="366" x2="1220" y2="412" stroke="#0891b2" stroke-width="4" marker-end="url(#arrow)"/>
+<line x1="1220" y1="516" x2="1220" y2="582" stroke="#0891b2" stroke-width="4" marker-end="url(#arrow)"/>
+<path d="M630 634 C760 634, 790 634, 930 634" stroke="#2563eb" stroke-width="6" fill="none" marker-end="url(#arrow)"/>
+<text x="700" y="615" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" font-weight="700" fill="#1d4ed8">ADB forwarding</text>
+<g filter="url(#shadow)"><rect x="120" y="885" rx="18" ry="18" width="1360" height="52" fill="#111827"/></g>
+<text x="145" y="918" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" fill="#f8fafc">Design intent: keep the host lightweight, keep device-specific capture and codec control on Android, and use standard IVF tooling for playback and recording.</text>
+</svg>
