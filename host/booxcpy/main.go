@@ -648,6 +648,14 @@ func runFFplayFromStdin(ctx context.Context, title string, extraArgs []string) (
 		_ = in.Close()
 		return nil, nil, err
 	}
+
+	go func() {
+		time.Sleep(700 * time.Millisecond)
+		tryActivateFFplayWindow()
+		time.Sleep(1200 * time.Millisecond)
+		tryActivateFFplayWindow()
+	}()
+
 	return cmd, in, nil
 }
 
@@ -966,4 +974,23 @@ func (a *ADB) IsServiceRunning(ctx context.Context, component string) (bool, str
 		return true, strings.Join(snippet, "\n"), nil
 	}
 	return false, "", nil
+}
+func tryActivateFFplayWindow() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+
+	script := `
+tell application "System Events"
+	repeat with p in application processes
+		try
+			if name of p contains "ffplay" then
+				set frontmost of p to true
+				exit repeat
+			end if
+		end try
+	end repeat
+end tell`
+
+	_ = exec.Command("osascript", "-e", script).Run()
 }
