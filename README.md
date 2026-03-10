@@ -259,9 +259,9 @@ The goal is not to replace scrcpy, but to explore a **simpler streaming pipeline
 # Demo
 
 Boox Leaf3C Videos
-- [ivf format](/demos/booxstream_Leaf3C.ivf)
-- [mkv format](/demos/booxstream_Leaf3C.mkv) (converted from ivf format for demo purposes)
-- [m4a format](/demos/booxstream_Leaf3C.m4a) (converted from ivf format for demo purposes)
+- [Leaf3C master recording (.ivf)](/demos/booxstream_Leaf3C_master.ivf)
+- [Leaf3C demo clip (.mp4)](/demos/booxstream_Leaf3C_demo.mp4)
+- [Leaf3C demo clip (.mkv)](/demos/booxstream_Leaf3C_demo.mkv)
 ---
 
 # Installation
