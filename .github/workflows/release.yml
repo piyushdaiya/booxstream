@@ -313,7 +313,7 @@ jobs:
           output-file: dist/SBOM.spdx.json
 
       - name: Attest build provenance (release assets)
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "dist/*"
 
