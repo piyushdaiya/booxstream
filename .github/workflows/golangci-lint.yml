@@ -19,7 +19,7 @@ jobs:
           cache: true
           cache-dependency-path: host/booxcpy/go.sum
 
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v1.61.0
           working-directory: host/booxcpy
